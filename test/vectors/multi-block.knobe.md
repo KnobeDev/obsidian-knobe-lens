@@ -1,0 +1,39 @@
+---
+title: "Multi-Block Test Vector"
+spec_version: "1.0"
+content_type: original
+privacy_level: public
+quarantine_status: trusted
+created_date: "2026-06-23"
+---
+# Multi-Block Test Vector
+
+This file contains two valid payload blocks. Per spec §3.3, verifiers MUST evaluate the last block and MUST surface a warning indicating block count and evaluated block index. Per spec §6, body_verified MUST be omitted regardless of body_hash because extraction is ambiguous.
+
+-----BEGIN KNOBE B64-----
+eyJhdHRyaWJ1dGlvbiI6eyJnb29kX2ZhaXRoX2RlY2xhcmF0aW9uIjp0cnVlLCJzb3VyY2VzIjpb
+eyJhdXRob3IiOiJUZXN0IEF1dGhvciIsImNvbnRyaWJ1dGlvbiI6InRlc3QgdmVjdG9yIGF1dGhv
+cnNoaXAiLCJyaWdodHNfYmVhcmluZyI6dHJ1ZX1dfSwiY29udGVudF90eXBlIjoib3JpZ2luYWwi
+LCJjcmVhdGVkX2RhdGUiOiIyMDI2LTA2LTIzIiwibGljZW5zZSI6IkNDIEJZIDQuMCIsInBheWxv
+YWRfaGFzaCI6ImEzYWI2M2NkZjk5NjBiZmI1OGQ1MTgyNTQ0OTI0ZWFkMjNlODlhOWI0OGE5MDQ5
+NzVmNDkxYzIzOGViN2I5MzUiLCJwcml2YWN5X2xldmVsIjoicHVibGljIiwicXVhcmFudGluZV9z
+dGF0dXMiOiJ0cnVzdGVkIiwic3BlY192ZXJzaW9uIjoiMS4wIiwic3VtbWFyeSI6IlRoaXMgYmxv
+Y2sgZXhpc3RzIGJ1dCB0aGUgdmVyaWZpZXIgdXNlcyB0aGUgbGFzdCBibG9jayBwZXIgc3BlYy4i
+LCJ0aXRsZSI6IkZpcnN0IEJsb2NrICh3aWxsIG5vdCBiZSBldmFsdWF0ZWQpIn0=
+-----END KNOBE B64-----
+
+## Second block follows
+
+Some text between the blocks.
+
+-----BEGIN KNOBE B64-----
+eyJhdHRyaWJ1dGlvbiI6eyJnb29kX2ZhaXRoX2RlY2xhcmF0aW9uIjp0cnVlLCJzb3VyY2VzIjpb
+eyJhdXRob3IiOiJUZXN0IEF1dGhvciIsImNvbnRyaWJ1dGlvbiI6InRlc3QgdmVjdG9yIGF1dGhv
+cnNoaXAiLCJyaWdodHNfYmVhcmluZyI6dHJ1ZX1dfSwiY29udGVudF90eXBlIjoib3JpZ2luYWwi
+LCJjcmVhdGVkX2RhdGUiOiIyMDI2LTA2LTIzIiwibGljZW5zZSI6IkNDIEJZIDQuMCIsInBheWxv
+YWRfaGFzaCI6IjdjODBmMzg2ZDcxMjliZWQ2N2ZjNmVlOWU0NjlmM2NmOGI4NWY3MDNlZWFiNzM5
+OWI3ODY3MGRiYTFlYzg1NWUiLCJwcml2YWN5X2xldmVsIjoicHVibGljIiwicXVhcmFudGluZV9z
+dGF0dXMiOiJ0cnVzdGVkIiwic3BlY192ZXJzaW9uIjoiMS4wIiwic3VtbWFyeSI6IlR3byBwYXls
+b2FkIGJsb2Nrcy4gVmVyaWZpZXIgZXZhbHVhdGVzIHRoZSBsYXN0IGFuZCB3YXJucy4iLCJ0aXRs
+ZSI6Ik11bHRpLUJsb2NrIFRlc3QgVmVjdG9yIn0=
+-----END KNOBE B64-----

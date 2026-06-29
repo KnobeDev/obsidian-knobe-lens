@@ -1,0 +1,83 @@
+{
+  "full-valid.knobe.md": {
+    "state": "verified",
+    "conformance": "valid",
+    "body_verified": "yes",
+    "computed": "3e788ff828f3b50bfeedd6a9c3569740190edba84579364f5ab00b35a7ef7001",
+    "stored": "3e788ff828f3b50bfeedd6a9c3569740190edba84579364f5ab00b35a7ef7001",
+    "block_count": 1,
+    "exit": 0
+  },
+  "minimal-valid.knobe.md": {
+    "state": "verified",
+    "conformance": "valid",
+    "body_verified": "omitted",
+    "computed": "e1c612a10db6403d7b09ebc453a0201c5ef8998aaa3501653aa5d47a7accf6f7",
+    "stored": "e1c612a10db6403d7b09ebc453a0201c5ef8998aaa3501653aa5d47a7accf6f7",
+    "block_count": 1,
+    "exit": 0
+  },
+  "unicode-valid.knobe.md": {
+    "state": "verified",
+    "conformance": "valid",
+    "body_verified": "yes",
+    "computed": "6f20e388f677dd7185dea35a8ae4a7587bb27639a1ac65a0d84f731910cf228c",
+    "stored": "6f20e388f677dd7185dea35a8ae4a7587bb27639a1ac65a0d84f731910cf228c",
+    "block_count": 1,
+    "exit": 0
+  },
+  "multi-block.knobe.md": {
+    "state": "verified",
+    "conformance": "warnings",
+    "body_verified": "omitted",
+    "computed": "7c80f386d7129bed67fc6ee9e469f3cf8b85f703eeab7399b78670dba1ec855e",
+    "stored": "7c80f386d7129bed67fc6ee9e469f3cf8b85f703eeab7399b78670dba1ec855e",
+    "block_count": 2,
+    "exit": 0
+  },
+  "omitted-body-hash.knobe.md": {
+    "state": "verified",
+    "conformance": "valid",
+    "body_verified": "omitted",
+    "computed": "c28185abd801e0622ed5331198b9e674ae996996a19d574a22457fc569e1cddd",
+    "stored": "c28185abd801e0622ed5331198b9e674ae996996a19d574a22457fc569e1cddd",
+    "block_count": 1,
+    "exit": 0
+  },
+  "numeric-violation.knobe.md": {
+    "state": "verified",
+    "conformance": "invalid",
+    "body_verified": "yes",
+    "computed": "d4440ada0f69c878d01595073a638313f3c6f9a78ca7dd068f877122ae2e2d4a",
+    "stored": "d4440ada0f69c878d01595073a638313f3c6f9a78ca7dd068f877122ae2e2d4a",
+    "block_count": 1,
+    "exit": 1
+  },
+  "body-modified.knobe.md": {
+    "state": "verified-body-modified",
+    "conformance": "valid",
+    "body_verified": "modified",
+    "computed": "3e788ff828f3b50bfeedd6a9c3569740190edba84579364f5ab00b35a7ef7001",
+    "stored": "3e788ff828f3b50bfeedd6a9c3569740190edba84579364f5ab00b35a7ef7001",
+    "block_count": 1,
+    "exit": 0
+  },
+  "payload-modified.knobe.md": {
+    "state": "failed",
+    "conformance": "valid",
+    "body_verified": "omitted",
+    "computed": "ad2df83060086f147694bdfdbc10c232d35082c88754cd485527c28c5c30919c",
+    "stored": "e1c612a10db6403d7b09ebc453a0201c5ef8998aaa3501653aa5d47a7accf6f7",
+    "block_count": 1,
+    "exit": 1
+  },
+  "unreadable.knobe.md": {
+    "state": "unreadable",
+    "conformance": "invalid",
+    "body_verified": null,
+    "computed": null,
+    "stored": null,
+    "block_count": 1,
+    "exit": 2
+  }
+}

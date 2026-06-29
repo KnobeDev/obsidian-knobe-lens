@@ -1,0 +1,270 @@
+.knobe-lens {
+  padding: 0 6px;
+}
+.knobe-lens-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.knobe-lens-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  border-left: 2px solid var(--background-modifier-border);
+  padding-left: 10px;
+  margin: 8px 0;
+}
+.knobe-lens-summary,
+.knobe-lens-muted {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0 12px;
+}
+.knobe-lens-section {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin: 16px 0 6px;
+}
+
+/* table */
+.knobe-lens-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.knobe-lens-table th {
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.knobe-lens-table td {
+  font-size: 13px;
+  padding: 8px;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+  vertical-align: top;
+}
+.knobe-lens-row {
+  cursor: pointer;
+}
+.knobe-lens-row:hover {
+  background: var(--background-secondary);
+}
+.knobe-lens-row.is-selected {
+  background: var(--background-secondary);
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
+}
+.knobe-lens-row:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+.knobe-lens-title {
+  font-weight: var(--font-medium);
+}
+.knobe-lens-path {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* status badge (icon + text, never colour alone) */
+.knobe-lens-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.knobe-lens-badge-icon {
+  display: inline-flex;
+}
+.knobe-lens-badge-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.state-verified { color: var(--color-green); }
+.state-verified-body-modified { color: var(--color-yellow); }
+.state-failed { color: var(--color-red); }
+.state-unreadable { color: var(--text-muted); }
+
+/* detail pane */
+.knobe-lens-detail:empty {
+  display: none;
+}
+.knobe-lens-detail {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+.knobe-lens-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.knobe-lens-detail-title {
+  font-size: 15px;
+  font-weight: var(--font-medium);
+  margin: 0;
+}
+h5.knobe-lens-section {
+  margin: 16px 0 6px;
+}
+.knobe-lens-hash {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.knobe-lens-bad {
+  color: var(--text-error);
+}
+.knobe-lens-fields {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.knobe-lens-fields td {
+  font-size: 13px;
+  padding: 4px 8px 4px 0;
+  vertical-align: top;
+}
+.knobe-lens-fname {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  color: var(--text-accent);
+  width: 36%;
+}
+.knobe-lens-pre {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.knobe-lens-body {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.knobe-lens-bodywrap {
+  margin: 8px 0;
+}
+
+/* break inspector */
+.knobe-lens-inspector,
+.knobe-lens-trust {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.knobe-lens-diagnosis {
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--background-modifier-border);
+}
+.knobe-lens-diagnosis.is-benign {
+  border-left-color: var(--color-yellow);
+  background: var(--background-secondary);
+}
+.knobe-lens-diagnosis.is-serious {
+  border-left-color: var(--text-error);
+  background: var(--background-secondary);
+}
+.knobe-lens-diag-tag {
+  font-weight: var(--font-medium);
+}
+.knobe-lens-regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.knobe-lens-chip {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+}
+.knobe-lens-chip-label {
+  color: var(--text-faint);
+}
+.chip-ok { border-color: var(--background-modifier-border); }
+.chip-warn { border-color: var(--color-yellow); }
+.knobe-lens-diff .diff-add { color: var(--color-green); }
+.knobe-lens-diff .diff-del { color: var(--color-red); }
+.knobe-lens-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.knobe-lens-note-input {
+  width: 100%;
+  margin: 8px 0;
+}
+
+/* lineage */
+.knobe-lens-lineage {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--background-secondary);
+  overflow-x: auto;
+}
+.knobe-lineage-node {
+  cursor: pointer;
+}
+.knobe-lineage-node:focus-visible rect {
+  outline: 2px solid var(--interactive-accent);
+}
+.knobe-lineage-fallback {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+/* screen-reader-only (table caption etc.) */
+.knobe-lens-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* row trigger: a real button that fills the first cell invisibly */
+.knobe-lens-row-trigger {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.knobe-lens-row-trigger:hover {
+  background: none;
+}
+.knobe-lens-row-trigger:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}

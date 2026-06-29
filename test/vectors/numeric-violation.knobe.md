@@ -1,0 +1,25 @@
+---
+title: "Numeric Violation Test Vector"
+spec_version: "1.0"
+content_type: original
+privacy_level: public
+quarantine_status: trusted
+created_date: "2026-06-23"
+---
+# Numeric Violation Test Vector
+
+This test vector contains a bare integer in its payload, demonstrating the conformance check at work. Integrity verifies cleanly; conformance reports invalid because spec §5 requires all numeric payload values to be JSON strings.
+
+-----BEGIN KNOBE B64-----
+eyJhdHRyaWJ1dGlvbiI6eyJnb29kX2ZhaXRoX2RlY2xhcmF0aW9uIjp0cnVlLCJzb3VyY2VzIjpb
+eyJhdXRob3IiOiJUZXN0IEF1dGhvciIsImNvbnRyaWJ1dGlvbiI6InRlc3QgdmVjdG9yIGF1dGhv
+cnNoaXAiLCJyaWdodHNfYmVhcmluZyI6dHJ1ZX1dfSwiYm9keV9oYXNoIjoiZjc5OGY0ZmZlYjBm
+NzFiMTA1OGUyOWQ1MTkwYzNiZDU2Y2E1ZWFmNzQ3ZTVmNTIxMDMxOWE4MTkyZTk5YThmYyIsImNv
+bnRlbnRfdHlwZSI6Im9yaWdpbmFsIiwiY3JlYXRlZF9kYXRlIjoiMjAyNi0wNi0yMyIsImxpY2Vu
+c2UiOiJDQyBCWSA0LjAiLCJwYXlsb2FkX2hhc2giOiJkNDQ0MGFkYTBmNjljODc4ZDAxNTk1MDcz
+YTYzODMxM2YzYzZmOWE3OGNhN2RkMDY4Zjg3NzEyMmFlMmUyZDRhIiwicHJpdmFjeV9sZXZlbCI6
+InB1YmxpYyIsInF1YXJhbnRpbmVfc3RhdHVzIjoidHJ1c3RlZCIsInNwZWNfdmVyc2lvbiI6IjEu
+MCIsInN1bW1hcnkiOiJCYXJlIGludGVnZXIgaW4gcGF5bG9hZCB0cmlnZ2VycyBjb25mb3JtYW5j
+ZTppbnZhbGlkIHdoaWxlIGludGVncml0eSByZW1haW5zIHZlcmlmaWVkLiIsInRlc3RfeWVhciI6
+MjAyNiwidGl0bGUiOiJOdW1lcmljIFZpb2xhdGlvbiBUZXN0IFZlY3RvciJ9
+-----END KNOBE B64-----

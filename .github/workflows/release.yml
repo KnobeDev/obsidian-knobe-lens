@@ -1,0 +1,56 @@
+name: Release plugin
+
+# Cut a release by pushing a version tag matching the manifest version, e.g.:
+#   git tag 0.1.0 && git push origin 0.1.0
+# The job builds the plugin and attaches the files BRAT / Obsidian need.
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify build artifacts exist
+        run: |
+          for f in main.js manifest.json styles.css; do
+            test -f "$f" || { echo "::error::missing $f"; exit 1; }
+          done
+
+      - name: Verify tag matches manifest version
+        run: |
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$MANIFEST_VERSION" ]; then
+            echo "::error::tag '$GITHUB_REF_NAME' != manifest version '$MANIFEST_VERSION'"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            main.js manifest.json styles.css \
+            --title "$TAG" \
+            --generate-notes

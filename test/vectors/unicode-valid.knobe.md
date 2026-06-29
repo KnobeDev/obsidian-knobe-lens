@@ -1,0 +1,24 @@
+---
+title: "Unicode Valid KNOBE"
+spec_version: "1.0"
+created_date: "2026-06-16"
+---
+
+# Unicode Valid KNOBE
+
+Non-ASCII content: café, naïve, 日本語, 木漏れ日, Ω, 🌲, María Sequoia. Confirms UTF-8 literal encoding (ensure_ascii=False). Expected status: verified.
+
+-----BEGIN KNOBE B64-----
+eyJhdHRyaWJ1dGlvbiI6eyJzb3VyY2VzIjpbeyJhdXRob3IiOiJNYXLDrWEgU2VxdW9pYSIsImNv
+bnRyaWJ1dGlvbiI6IlVuaWNvZGUgdGVzdCDigJQgbmHDr3ZlIGZhw6dhZGUgY2Fmw6kg5pel5pys
+6KqeIn1dfSwiYm9keV9oYXNoIjoiYzBlMjdlOTdjZjBmZDMyNjE0ZWMxZDRkNzJjZTkwN2FlNmY3
+YzllYTliYzI1YjM1M2M1MDE0ODU2Y2VmMmYwMiIsImNvbnRlbnRfdHlwZSI6Im9yaWdpbmFsIiwi
+Y3JlYXRlZF9kYXRlIjoiMjAyNi0wNi0xNiIsImxhbmd1YWdlIjoiZW4iLCJsaWNlbnNlIjoiQ0Mg
+QlkgNC4wIiwicGF5bG9hZF9oYXNoIjoiNmYyMGUzODhmNjc3ZGQ3MTg1ZGVhMzVhOGFlNGE3NTg3
+YmIyNzYzOWExYWM2NWEwZDg0ZjczMTkxMGNmMjI4YyIsInByaXZhY3lfbGV2ZWwiOiJwdWJsaWMi
+LCJxdWFyYW50aW5lX3N0YXR1cyI6InF1YXJhbnRpbmUiLCJzcGVjX3ZlcnNpb24iOiIxLjAiLCJz
+dW1tYXJ5IjoiQ29uZmlybXMgY2Fub25pY2FsIEpTT04gcHJlc2VydmVzIGxpdGVyYWwgVVRGLTg6
+IGNhZsOpLCBuYcOvdmUsIOaXpeacrOiqniwgzqksIPCfjLIuIiwidGFncyI6WyJ0ZXN0LXZlY3Rv
+ciIsInVuaWNvZGUiLCJjYWbDqSIsIuaXpeacrOiqniJdLCJ0aXRsZSI6IlVuaWNvZGUgVmFsaWQg
+S05PQkUg4oCUIGNhZsOpIOacqOa8j+OCjOaXpSDwn4yyIn0=
+-----END KNOBE B64-----

@@ -1,0 +1,69 @@
+import { describe, it, expect } from "vitest";
+import { sealKnobe, splitNote, SealFields } from "../src/seal";
+import { verify } from "../src/lens-core";
+
+const FM = `---\ntitle: "Round Trip"\nspec_version: "1.0"\n---`;
+const BODY = "# Round Trip\n\nHello world. This body gets sealed.";
+
+const fields = (): SealFields => ({
+  title: "Round Trip",
+  summary: "demo object",
+  content_type: "original",
+  created_date: "2026-06-28",
+  license: "CC BY 4.0",
+  privacy_level: "public",
+  quarantine_status: "quarantine",
+  attribution: { sources: [{ author: "A. Author", contribution: "authorship" }] },
+});
+
+describe("sealer round-trips through the verifier", () => {
+  it("seal -> verify = verified / body yes / valid", async () => {
+    const r = await verify(await sealKnobe(FM, BODY, fields()));
+    expect(r.state).toBe("verified");
+    expect(r.bodyVerified).toBe("yes");
+    expect(r.conformance).toBe("valid");
+  });
+
+  it("editing the sealed body is detected as body-modified", async () => {
+    const sealed = await sealKnobe(FM, BODY, fields());
+    const r = await verify(sealed.replace("Hello world.", "Hello changed world."));
+    expect(r.state).toBe("verified-body-modified");
+  });
+
+  it("works with no pre-existing frontmatter (minimal frontmatter is synthesized)", async () => {
+    const r = await verify(await sealKnobe(`---\ntitle: "x"\nspec_version: "1.0"\n---`, "plain body", fields()));
+    expect(r.state).toBe("verified");
+    expect(r.conformance).toBe("valid");
+  });
+
+  it("is idempotent — re-sealing yields identical bytes (no save loop)", async () => {
+    const once = await sealKnobe(FM, BODY, fields());
+    const split = splitNote(once);
+    const twice = await sealKnobe(split.frontmatter, split.body, fields());
+    expect(twice).toBe(once);
+  });
+
+  it("re-sealing strips the previous block — exactly one seal remains", async () => {
+    const once = await sealKnobe(FM, BODY, fields());
+    const split = splitNote(once);
+    const twice = await sealKnobe(split.frontmatter, split.body, fields());
+    expect((twice.match(/-----BEGIN KNOBE B64-----/g) || []).length).toBe(1);
+  });
+
+  it("embed body snapshot: round-trips and carries ext_body_snapshot", async () => {
+    const sealed = await sealKnobe(FM, BODY, fields(), { embedBody: true });
+    const r = await verify(sealed);
+    expect(r.state).toBe("verified");
+    expect(r.conformance).toBe("valid");
+    const snap = (r.payload as Record<string, unknown>).ext_body_snapshot;
+    expect(typeof snap).toBe("string");
+    expect(snap as string).toContain("This body gets sealed");
+  });
+
+  it("embed body snapshot is idempotent (no reseal loop)", async () => {
+    const once = await sealKnobe(FM, BODY, fields(), { embedBody: true });
+    const split = splitNote(once);
+    const twice = await sealKnobe(split.frontmatter, split.body, fields(), { embedBody: true });
+    expect(twice).toBe(once);
+  });
+});
