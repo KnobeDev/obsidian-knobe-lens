@@ -7,6 +7,30 @@ KNOBE keeps a document's interpretive context — attribution, transformations, 
 - **Lens (read):** a dashboard of every KNOBE in the vault with integrity status, conformance, declared quarantine status, and your local trust verdict; a detail pane with the decoded payload; and an adaptation-lineage graph.
 - **Sealer (write):** a "Seal current note as KNOBE" command and an optional "re-seal on save" toggle. Keyless (SHA-256 integrity only — no signature, no secret).
 
+## Install
+
+### Via BRAT (recommended)
+
+1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin.
+2. BRAT → **Add beta plugin** → `https://github.com/jdhori/obsidian-knobe-lens`.
+3. Enable **KNOBE Lens** under Settings → Community plugins.
+
+BRAT installs the latest GitHub release and keeps it updated.
+
+### Manual
+
+Download `main.js`, `manifest.json`, and `styles.css` from the
+[latest release](https://github.com/jdhori/obsidian-knobe-lens/releases/latest)
+into `<vault>/.obsidian/plugins/knobe-lens/`, then enable the plugin.
+
+### From source
+
+```bash
+git clone https://github.com/jdhori/obsidian-knobe-lens
+cd obsidian-knobe-lens && npm install && npm run build
+# copy main.js, manifest.json, styles.css into <vault>/.obsidian/plugins/knobe-lens/
+```
+
 ## Features
 
 | Area | What it does |
