@@ -4,6 +4,49 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-06-29
+
+### Added
+
+- **Portfolios.** A new *Portfolios* section under *Adaptation lineage* lets you
+  organise objects into real vault folders under a configurable root (default
+  *KNOBE Portfolios*, set in settings). Each object you have locally marked
+  **trusted** gains a *Move to portfolio* dropdown in the dashboard — pick an
+  existing folder or **+ New folder…** to create one inline. Moves use Obsidian's
+  link-aware rename, so backlinks follow. The control stays disabled (with a
+  visible reason) until you trust the object, the result is announced through a
+  dedicated polite live region, and focus returns to the moved object — never to
+  nowhere.
+
+### Fixed
+
+- **Recognises KNOBEs with CRLF / mixed line endings.** Block detection now
+  tolerates `\r\n` and doubled `\r\r\n` line terminators (common from Windows
+  and some exporters). Previously such a note — even a perfectly valid seal —
+  was reported *unreadable* ("no payload block found") because the marker line
+  wasn't matched. Pure-LF files are byte-for-byte unaffected (the 9 reference
+  conformance vectors still pass unchanged).
+- **Surfaces objects this lens cannot verify instead of hiding them.** Notes
+  using a legacy/variant marker (`-----BEGIN KNOBE B-----`) are now listed with
+  their real title and an actionable reason (e.g. *"KNOBE block has no
+  payload_hash (unsealed/legacy); re-seal this note to verify"*), rather than
+  being silently skipped.
+
+### Changed
+
+- **Verifies every object under 1.0 rules, regardless of its declared version.**
+  Present non-1.0 `spec_version` labels (2.9, 3.0, …) are premature — the on-disk
+  format is 1.0 — so the version gate is gone and every object is checked under
+  1.0 canonicalization. This is safe against false positives: a genuinely
+  different canonicalization simply fails the hash, it can never produce a
+  spurious *verified*. A non-1.0 label is surfaced as a conformance **warning**
+  so the normalization stays visible. (The published KNOBE Seed v1.1, labelled
+  2.9, now verifies — its hash reproduces exactly under 1.0 rules.)
+- **Single source of truth for the seal marker.** The marker/prefilter is now
+  defined once in the verifier and shared by the scanner, sealer, and plugin.
+  Re-seal-on-save additionally guards on a verified state, so it can never
+  rewrite an unsupported/legacy object as a 1.0 seal.
+
 ## [0.2.0] - 2026-06-29
 
 ### Added
@@ -44,5 +87,6 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.3.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.3.0
 [0.2.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.2.0
 [0.1.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.1.0
