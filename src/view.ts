@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, debounce, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, Notice, debounce, setIcon } from "obsidian";
 import type KnobeLensPlugin from "./main";
 import { scanVault, ScanRow } from "./scanner";
 import { Status, extractBodyText } from "./lens-core";
@@ -7,6 +7,8 @@ import { lineDiff } from "./diff";
 import { buildLineage } from "./lineage";
 import { renderLineage } from "./lineage-render";
 import { getVerdict } from "./trust";
+import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE } from "./portfolio";
+import { NewFolderModal } from "./new-folder-modal";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
 const BODY_PREVIEW_LINES = 10;
@@ -31,7 +33,13 @@ export class KnobeLensView extends ItemView {
   private tableBody!: HTMLElement;
   private detailEl!: HTMLElement;
   private lineageEl!: HTMLElement;
+  private portfoliosEl!: HTMLElement;
   private summaryEl!: HTMLElement;
+  // Dedicated polite live region for the result of explicit actions (a move, a
+  // folder creation). Kept separate from summaryEl so a transient "Moved…" never
+  // clobbers the persistent vault tally and is never re-announced on a silent
+  // background rescan.
+  private actionStatusEl!: HTMLElement;
 
   // Re-entrancy guard: a scan triggered while one is running coalesces into a
   // single trailing rescan instead of interleaving two passes over the vault.
@@ -78,11 +86,15 @@ export class KnobeLensView extends ItemView {
     });
 
     this.summaryEl = root.createEl("p", { cls: "knobe-lens-summary", attr: { role: "status", "aria-live": "polite" } });
+    this.actionStatusEl = root.createEl("p", {
+      cls: "knobe-lens-action-status knobe-lens-sr-only",
+      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+    });
 
     const table = root.createEl("table", { cls: "knobe-lens-table" });
     table.createEl("caption", { text: "KNOBE objects in this vault", cls: "knobe-lens-sr-only" });
     const headRow = table.createEl("thead").createEl("tr");
-    for (const h of ["Object", "Status", "Conformance", "Declared", "Your verdict"]) {
+    for (const h of ["Object", "Status", "Conformance", "Declared", "Your verdict", "Portfolio"]) {
       headRow.createEl("th", { text: h, attr: { scope: "col" } });
     }
     this.tableBody = table.createEl("tbody");
@@ -91,6 +103,9 @@ export class KnobeLensView extends ItemView {
 
     root.createEl("h4", { text: "Adaptation lineage" });
     this.lineageEl = root.createDiv({ cls: "knobe-lens-lineage" });
+
+    root.createEl("h4", { text: "Portfolios" });
+    this.portfoliosEl = root.createDiv({ cls: "knobe-lens-portfolios" });
 
     this.registerVaultAutoRefresh();
     await this.refresh();
@@ -164,6 +179,7 @@ export class KnobeLensView extends ItemView {
     this.renderSummary();
     this.renderTable();
     this.renderLineage();
+    this.renderPortfolios();
 
     const sel = this.rows.find((r) => r.file.path === this.selectedPath);
     if (sel) await this.renderDetail(sel);
@@ -174,6 +190,12 @@ export class KnobeLensView extends ItemView {
    *  silent auto-refresh to an unchanged vault doesn't re-announce to AT. */
   private setSummary(text: string): void {
     if (this.summaryEl.textContent !== text) this.summaryEl.setText(text);
+  }
+
+  /** Announce the result of an explicit user action (move / create). Call only
+   *  from user-initiated handlers — never from a background rescan. */
+  private setActionStatus(text: string): void {
+    if (this.actionStatusEl.textContent !== text) this.actionStatusEl.setText(text);
   }
 
   private renderSummary(): void {
@@ -196,7 +218,7 @@ export class KnobeLensView extends ItemView {
   private renderTable(): void {
     this.tableBody.empty();
     this.rowTriggers.clear();
-    for (const row of this.rows) {
+    this.rows.forEach((row, index) => {
       const tr = this.tableBody.createEl("tr", { cls: "knobe-lens-row" });
 
       // First cell carries a real button so native keyboard semantics apply and
@@ -216,7 +238,121 @@ export class KnobeLensView extends ItemView {
       const verdict = getVerdict(this.plugin.trust, row.payloadHash);
       tr.createEl("td", { text: verdict ? `you: ${verdict.verdict}` : "—" });
 
+      this.renderMoveControl(tr.createEl("td"), row, index);
+
       tr.toggleClass("is-selected", row.file.path === this.selectedPath);
+    });
+  }
+
+  /**
+   * Per-row "Move to portfolio" control. A native <select> (free keyboard/AT
+   * semantics, change = up-event for SC 2.5.2). Enabled only once the user has
+   * locally marked the object "trusted" — otherwise it is truly disabled with a
+   * visible, programmatically-associated reason (never colour alone, SC 1.4.1).
+   */
+  private renderMoveControl(td: HTMLElement, row: ScanRow, index: number): void {
+    const id = `${index}`;
+    const selId = `kl-move-${id}`;
+    const helpId = `kl-move-help-${id}`;
+
+    // Hidden label carries the object title so each row's control is
+    // distinguishable and voice-addressable ("Move '<title>' to portfolio").
+    td.createEl("label", { cls: "knobe-lens-sr-only", text: `Move "${row.title}" to portfolio`, attr: { for: selId } });
+    const select = td.createEl("select", { cls: "knobe-lens-move", attr: { id: selId } });
+
+    const trusted = getVerdict(this.plugin.trust, row.payloadHash)?.verdict === "trusted";
+    if (!trusted) {
+      select.createEl("option", { text: "Move to portfolio…", attr: { value: NO_FOLDER_VALUE } });
+      select.setAttr("disabled", "true");
+      select.setAttr("aria-describedby", helpId);
+      td.createEl("div", { cls: "knobe-lens-move-help", text: "Trust to file", attr: { id: helpId } });
+      return;
+    }
+
+    const currentPath = row.file.parent?.path ?? "";
+    const folders = this.plugin.portfolioFolders();
+    select.createEl("option", { text: `Move "${row.title}" to…`, attr: { value: NO_FOLDER_VALUE } });
+    for (const f of folders) {
+      const opt = select.createEl("option", { text: f.name, attr: { value: f.path } });
+      if (f.path === currentPath) opt.setAttr("selected", "true");
+    }
+    select.createEl("option", { text: "+ New folder…", attr: { value: NEW_FOLDER_VALUE } });
+
+    let prevValue = select.value;
+    select.addEventListener("change", () => {
+      const value = select.value;
+      if (value === NO_FOLDER_VALUE) { prevValue = value; return; }
+      if (value === NEW_FOLDER_VALUE) {
+        select.value = prevValue; // don't leave the control stuck on the sentinel
+        new NewFolderModal(this.app, {
+          onSubmit: async (name) => {
+            try {
+              const folder = await this.plugin.createPortfolioFolder(name);
+              await this.plugin.moveToPortfolio(row.file, folder.path);
+              await this.afterMove(row, folder.name);
+              return null;
+            } catch (e) {
+              return errorMessage(e);
+            }
+          },
+        }).open();
+        return;
+      }
+      // A concrete folder path.
+      const folderName = select.options[select.selectedIndex]?.text ?? value;
+      void (async () => {
+        try {
+          await this.plugin.moveToPortfolio(row.file, value);
+          prevValue = value;
+          await this.afterMove(row, folderName);
+        } catch (e) {
+          new Notice(errorMessage(e));
+          select.value = prevValue; // revert the UI; nothing moved
+        }
+      })();
+    });
+  }
+
+  /** After a successful move: announce, rescan, and restore focus to the moved
+   *  object's detail so focus never falls to <body>. The TFile is mutated in
+   *  place by the rename, so row.file.path is already the new path. */
+  private async afterMove(row: ScanRow, folderName: string): Promise<void> {
+    this.setActionStatus(`Moved "${row.title}" to "${folderName}".`);
+    // The rename already queued a debounced rescan; cancel it and rescan once now.
+    this.scheduleRefresh.cancel();
+    await this.refresh(false);
+    const moved = this.rows.find((r) => r.file.path === row.file.path);
+    if (moved) { await this.select(moved); return; }
+    // The moved object left the scan scope — keep focus in the view, not on <body>.
+    this.detailEl.setAttr("aria-label", `Moved "${row.title}" to "${folderName}".`);
+    this.detailEl.focus();
+  }
+
+  private renderPortfolios(): void {
+    const c = this.portfoliosEl;
+    c.empty();
+    const folders = this.plugin.portfolioFolders();
+    if (folders.length === 0) {
+      c.createEl("p", {
+        cls: "knobe-lens-muted",
+        text: "No portfolios yet. Mark an object trusted, then use its “Move to portfolio” control to file it.",
+      });
+      return;
+    }
+    const list = c.createEl("ul", { cls: "knobe-lens-portfolio-list" });
+    for (const folder of folders) {
+      const li = list.createEl("li", { cls: "knobe-lens-portfolio" });
+      li.createEl("h5", { text: folder.name, cls: "knobe-lens-section" });
+      const members = this.rows.filter((r) => r.file.parent?.path === folder.path);
+      if (members.length === 0) {
+        li.createEl("p", { cls: "knobe-lens-muted", text: "No KNOBEs filed here yet." });
+        continue;
+      }
+      const inner = li.createEl("ul", { cls: "knobe-lens-portfolio-members" });
+      for (const r of members) {
+        const trigger = inner.createEl("li").createEl("button", { cls: "knobe-lens-row-trigger", text: r.title });
+        trigger.onclick = () => void this.select(r);
+      }
     }
   }
 
@@ -395,6 +531,11 @@ export class KnobeLensView extends ItemView {
 
 function short(h: string | null): string {
   return h ? h.slice(0, 12) + "…" : "—";
+}
+
+/** User-facing message from a thrown value (portfolio ops throw Error). */
+function errorMessage(e: unknown): string {
+  return e instanceof Error && e.message ? e.message : "Could not complete the move — see the developer console.";
 }
 
 function renderValue(v: unknown): string {
