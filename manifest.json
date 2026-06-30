@@ -3,7 +3,7 @@
   "name": "KNOBE Lens",
   "version": "0.1.0",
   "minAppVersion": "1.4.0",
-  "description": "Verify and inspect KNOBE Protocol v1 knowledge objects (.knobe.md) in your vault: integrity status, conformance, quarantine, and adaptation lineage.",
+  "description": "Verify and inspect sealed KNOBE Protocol v1 knowledge objects in your vault (any sealed Markdown note, conventionally named .knobe.md): integrity status, conformance, quarantine, and adaptation lineage.",
   "author": "KNOBE Protocol",
   "authorUrl": "https://knobe.org",
   "isDesktopOnly": false
