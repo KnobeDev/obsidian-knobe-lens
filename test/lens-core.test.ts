@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { verify, hasKnobeMarker } from "../src/lens-core";
 
@@ -121,5 +122,79 @@ describe("recognition: surface objects this lens cannot verify", () => {
     const r = await verify(wrap(b64(`{"spec_version":"3.0","title":"x","payload_hash":"${fakeHash}"}`)));
     expect(r.state).toBe("failed"); // reached hash verification, not version-gated
     expect(r.conformanceIssues.some((i) => i.includes("not a finalized KNOBE version"))).toBe(true);
+  });
+});
+
+describe("KNOBE.AI 0.1 HTML-comment / claim-fields-join envelope", () => {
+  const SEP = "\n---\n";
+  const claimHash = (vals: string[]) => createHash("sha256").update(vals.join(SEP), "utf8").digest("hex");
+  const doc = (payload: object) =>
+    `# A note\n\n<!-- KNOBE_PAYLOAD_START -->\n<script type="application/json" id="knobe-payload">\n${JSON.stringify(payload)}\n</script>\n<!-- KNOBE_PAYLOAD_END -->\n<!-- KNOBE_INTEGRITY -->\n`;
+  const payload = (sha: string, fields: Record<string, string> = { a: "alpha", b: "beta value" }) => ({
+    knobe_version: "0.1",
+    content_type: "original",
+    header: { title: "Grove journey" },
+    fields,
+    integrity: {
+      algo: "SHA-256",
+      canonicalization: { method: "claim-fields-join-v0.1", separator: "\\n---\\n", encoding: "UTF-8" },
+      claim_fields: ["a", "b"],
+      sha256: sha,
+    },
+  });
+
+  it("hasKnobeMarker matches the HTML payload-start comment", () => {
+    expect(hasKnobeMarker("x\n<!-- KNOBE_PAYLOAD_START -->\n")).toBe(true);
+  });
+
+  it("verifies a correct claim-fields-join seal", async () => {
+    const r = await verify(doc(payload(claimHash(["alpha", "beta value"]))));
+    expect(r.state).toBe("verified");
+    expect(r.conformance).toBe("valid");
+    expect((r.payload?.header as Record<string, string>)?.title).toBe("Grove journey");
+  });
+
+  it("fails when a sealed claim field is tampered", async () => {
+    const sha = claimHash(["alpha", "beta value"]); // hash over the ORIGINAL values
+    const r = await verify(doc(payload(sha, { a: "alpha", b: "TAMPERED" })));
+    expect(r.state).toBe("failed");
+  });
+
+  it("surfaces an unsupported canonicalization method as unreadable but recognized", async () => {
+    const p = payload("0".repeat(64));
+    p.integrity.canonicalization.method = "claim-fields-join-v9.9";
+    const r = await verify(doc(p));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toContain("unsupported KNOBE canonicalization");
+    expect(r.payload).toBeTruthy(); // still recognized, just not verified
+  });
+
+  it("refuses to verify when a claim value contains the join separator (injection guard)", async () => {
+    const fields = { a: "alpha\n---\ninjected", b: "beta value" };
+    const r = await verify(doc(payload(claimHash(["alpha\n---\ninjected", "beta value"]), fields)));
+    expect(r.state).toBe("unreadable"); // would otherwise hash-match — refused as ambiguous
+    expect(r.reason).toContain("separator");
+  });
+
+  it("treats a missing integrity.sha256 as unreadable, not failed", async () => {
+    const p = payload("");
+    (p.integrity as Record<string, unknown>).sha256 = undefined;
+    const r = await verify(doc(p));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toContain("integrity.sha256");
+  });
+});
+
+describe("input bounds", () => {
+  it("refuses to scan an oversized file instead of running the block regexes", async () => {
+    const r = await verify("-----BEGIN KNOBE B64-----\n" + "x".repeat(1_000_001));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toContain("too large");
+  });
+
+  it("returns quickly on an HTML start marker with no end marker", async () => {
+    const r = await verify("<!-- KNOBE_PAYLOAD_START -->\n" + "z".repeat(50_000));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toContain("payload markers not found");
   });
 });

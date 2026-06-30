@@ -57,6 +57,11 @@ const CANONICAL_VOCAB: Record<string, Set<string>> = {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 
+// Upper bound on the note size we'll attempt to verify (1 MB). Sealed KNOBE
+// notes are tens of KB; this caps the cost of the block-extraction regexes on
+// adversarial input rather than freezing the UI thread.
+const MAX_RAW_BYTES = 1_000_000;
+
 // Canonical block markers. The verifier ONLY treats the B64 form as sealed.
 export const KNOBE_BEGIN_B64 = "-----BEGIN KNOBE B64-----";
 export const KNOBE_END_B64 = "-----END KNOBE B64-----";
@@ -72,12 +77,22 @@ const BARE_BLOCK_RE = /(?:^|\r*\n)-----BEGIN KNOBE B-----\r*\n([\s\S]*?)\r*\n---
 // Body extraction marker, CR-tolerant. Used via lastBodyMarkerStart().
 const BODY_MARKER_RE = /\r*\n-----BEGIN KNOBE B64-----\r*\n/g;
 
-// Cheap prefilter for "could this note contain a KNOBE block?" — matches both the
-// canonical B64 marker and the bare-B legacy variant, so unverifiable objects are
-// still SURFACED (visible in the dashboard) rather than silently skipped. This is
-// intentionally more lenient than BLOCK_RE: lenient for discovery, strict for
-// verification. Single source of truth shared by the scanner and the plugin.
-const KNOBE_MARKER_RE = /-----BEGIN KNOBE B(?:64)?-----/;
+// KNOBE.AI HTML-comment envelope (knobe_version 0.1): a JSON payload inside a
+// <script> tag, delimited by HTML comments, with a self-describing integrity
+// block. A second, fully distinct serialization from the PEM/B64 format above;
+// extracted with linear scans (see extractHtmlPayloadJson), not a lazy regex.
+// The only claim-fields canonicalization this verifier implements. Per the
+// format's self-description: SHA-256 over the claim_fields VALUES, in the listed
+// order, joined by this separator, UTF-8, no trailing separator.
+const CLAIM_JOIN_METHOD = "claim-fields-join-v0.1";
+const CLAIM_JOIN_SEP = "\n---\n";
+
+// Cheap prefilter for "could this note contain a KNOBE object?" — matches the
+// canonical B64 marker, the bare-B legacy variant, AND the 0.1 HTML envelope, so
+// every KNOBE serialization is SURFACED (visible in the dashboard) rather than
+// silently skipped. Intentionally more lenient than the per-format verifiers:
+// lenient for discovery, strict for verification. Shared by scanner and plugin.
+const KNOBE_MARKER_RE = /-----BEGIN KNOBE B(?:64)?-----|<!--\s*KNOBE_PAYLOAD_START\s*-->/;
 export const hasKnobeMarker = (raw: string): boolean => KNOBE_MARKER_RE.test(raw);
 
 /** Index of the last body marker (start of the `\r*\n` run), or -1. CR-tolerant
@@ -436,6 +451,91 @@ export function extractBodyText(raw: string): string | null {
   return start === null ? null : pre.slice(start);
 }
 
+/* ---- KNOBE.AI HTML-comment envelope (knobe_version 0.1) ---- */
+
+/** Compute the claim-fields-join-v0.1 hash, or an explanatory error.
+ *
+ *  SECURITY NOTE: the v0.1 join is NOT prefix-free — values are concatenated with
+ *  a plain separator and the field NAMES are not part of the preimage. A value
+ *  containing the separator could let two structurally different payloads hash
+ *  identically (separator injection). We faithfully implement the scheme but
+ *  REFUSE to assert "verified" when any value contains the separator, since the
+ *  preimage is then ambiguous. (Reported upstream: v0.2 should length-prefix or
+ *  include field names.) `claim_fields` lists names; values are read from the
+ *  sibling top-level `fields` map, per the format. */
+type HashResult = { hash: string } | { error: string };
+async function claimFieldsJoinHash(payload: Record<string, unknown>): Promise<HashResult> {
+  const integ = payload.integrity;
+  if (!isObj(integ) || !Array.isArray(integ.claim_fields)) return { error: "integrity.claim_fields is missing" };
+  const fields = payload.fields;
+  if (!isObj(fields)) return { error: "the fields object is missing" };
+  const values: string[] = [];
+  for (const name of integ.claim_fields) {
+    if (typeof name !== "string") return { error: "claim_fields contains a non-string name" };
+    const v = fields[name];
+    if (typeof v !== "string") return { error: `claim field '${name}' is missing or not a string` };
+    if (v.includes(CLAIM_JOIN_SEP)) return { error: `claim field '${name}' contains the join separator — ambiguous preimage, cannot verify safely` };
+    values.push(v);
+  }
+  return { hash: await sha256Hex(values.join(CLAIM_JOIN_SEP)) };
+}
+
+/** Extract the JSON text from the 0.1 HTML-comment envelope using linear scans
+ *  (no lazy-wildcard regex over the whole file — avoids O(n^2) backtracking on
+ *  adversarial input). Returns null when the delimiters aren't both present. */
+function extractHtmlPayloadJson(raw: string): string | null {
+  const startTok = raw.indexOf("KNOBE_PAYLOAD_START");
+  if (startTok < 0) return null;
+  const afterStart = raw.indexOf("-->", startTok);
+  if (afterStart < 0) return null;
+  const endTok = raw.indexOf("KNOBE_PAYLOAD_END", afterStart);
+  if (endTok < 0) return null;
+  const beforeEnd = raw.lastIndexOf("<!--", endTok);
+  if (beforeEnd < 0 || beforeEnd <= afterStart) return null;
+  const between = raw.slice(afterStart + 3, beforeEnd);
+  // `between` is bounded by the payload region, so a scoped regex here is safe.
+  const script = between.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+  return (script ? script[1] : between).trim();
+}
+
+/** Verify a KNOBE.AI 0.1 HTML-comment/script object. Self-describing: the payload
+ *  declares its own canonicalization; we implement claim-fields-join-v0.1 and
+ *  surface anything else as unreadable-but-recognized. */
+async function verifyHtmlEnvelope(raw: string): Promise<LensResult> {
+  const json = extractHtmlPayloadJson(raw);
+  if (json === null) return unreadable("KNOBE payload markers not found", 0);
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = parseStrictJson(json);
+    if (!isObj(parsed)) return unreadable("KNOBE payload is not a JSON object", 1);
+    payload = parsed;
+  } catch {
+    return unreadable("KNOBE payload could not be parsed", 1);
+  }
+
+  const integ = isObj(payload.integrity) ? payload.integrity : null;
+  const method = integ && isObj(integ.canonicalization) ? integ.canonicalization.method : undefined;
+  if (method !== CLAIM_JOIN_METHOD) {
+    return unreadable(`unsupported KNOBE canonicalization '${typeof method === "string" ? method : "unknown"}'`, 1, payload);
+  }
+
+  const stored = integ && typeof integ.sha256 === "string" ? integ.sha256 : null;
+  if (stored === null || !HEX64.test(stored)) {
+    return unreadable("KNOBE 0.1: integrity.sha256 is missing or not 64 lowercase hex", 1, payload);
+  }
+  const res = await claimFieldsJoinHash(payload);
+  if ("error" in res) return unreadable(`KNOBE 0.1: ${res.error}`, 1, payload);
+
+  return {
+    state: res.hash === stored ? "verified" : "failed",
+    computed: res.hash, stored, payload, missing: [],
+    body: null, bodyVerified: null,
+    conformance: "valid", conformanceIssues: [],
+    multipleBlocks: false, blockCount: 1, reason: null,
+  };
+}
+
 /** Decode the last bare-B (non-B64) block's JSON payload, or null. Used only to
  *  surface unverifiable legacy/variant objects with a meaningful title/reason.
  *  Assumes the same base64 encoding as B64 blocks; a raw-JSON or otherwise-encoded
@@ -458,14 +558,23 @@ function tryDecodeBareBlock(raw: string): Record<string, unknown> | null {
 /* ---- public entry point ---- */
 
 export async function verify(raw: string): Promise<LensResult> {
+  // Bound work before any block regex runs. The marker extractors use lazy
+  // wildcards that backtrack toward O(n^2) on adversarial input with a missing
+  // end marker; a real sealed note is far under this, so oversized files are
+  // refused rather than scanned. (The 0.1 path uses linear extraction already.)
+  if (raw.length > MAX_RAW_BYTES) return unreadable("file too large to verify", 0);
+
   const blocks: string[] = [];
   const re = new RegExp(BLOCK_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) blocks.push(m[1]);
   if (blocks.length === 0) {
-    // No canonical B64 block. If a bare-B (legacy/variant) block is present,
-    // surface it as unreadable with its declared spec_version and payload so the
-    // dashboard shows the real title and reason instead of hiding the file.
+    // No PEM/B64 block. A KNOBE.AI 0.1 HTML-comment envelope is a separate, fully
+    // verifiable serialization — route to its own verifier.
+    if (raw.includes("KNOBE_PAYLOAD_START")) return verifyHtmlEnvelope(raw);
+    // Otherwise: if a bare-B (legacy/variant) block is present, surface it as
+    // unreadable with its declared spec_version and payload so the dashboard
+    // shows the real title and reason instead of hiding the file.
     const bare = tryDecodeBareBlock(raw);
     if (bare) {
       const reason = typeof bare.payload_hash === "string"
