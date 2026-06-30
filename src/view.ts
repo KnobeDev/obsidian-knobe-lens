@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, debounce, setIcon } from "obsidian";
 import type KnobeLensPlugin from "./main";
 import { scanVault, ScanRow } from "./scanner";
 import { Status, extractBodyText } from "./lens-core";
@@ -32,6 +32,16 @@ export class KnobeLensView extends ItemView {
   private detailEl!: HTMLElement;
   private lineageEl!: HTMLElement;
   private summaryEl!: HTMLElement;
+
+  // Re-entrancy guard: a scan triggered while one is running coalesces into a
+  // single trailing rescan instead of interleaving two passes over the vault.
+  private refreshing = false;
+  private refreshQueued = false;
+
+  // Coalesce bursts of vault events (bulk move, save storms, reseal-on-save)
+  // into a single silent rescan ~400ms after the burst begins, capping rescan
+  // frequency during sustained activity.
+  private scheduleRefresh = debounce(() => void this.refresh(false), 400, false);
 
   constructor(leaf: WorkspaceLeaf, private plugin: KnobeLensPlugin) {
     super(leaf);
@@ -82,17 +92,63 @@ export class KnobeLensView extends ItemView {
     root.createEl("h4", { text: "Adaptation lineage" });
     this.lineageEl = root.createDiv({ cls: "knobe-lens-lineage" });
 
+    this.registerVaultAutoRefresh();
     await this.refresh();
   }
 
-  /** Full rescan + redraw. Used on open and after any file-mutating action. */
-  async refresh(): Promise<void> {
-    this.summaryEl.setText("Scanning vault…");
+  /**
+   * Keep the dashboard live: rescan when vault files change. registerEvent ties
+   * these listeners to the view's lifecycle, so they're removed when it closes.
+   * Markdown content can flip a seal; folder moves/renames/deletes can
+   * reorganize or remove KNOBEs — both warrant a rescan. Non-markdown file
+   * noise (images, etc.) is ignored. The rescan is debounced and silent so the
+   * aria-live summary isn't announced on every keystroke.
+   */
+  private registerVaultAutoRefresh(): void {
+    const structural = (f: TAbstractFile): void => {
+      // Folders (not TFile) always matter; files only when markdown.
+      if (!(f instanceof TFile) || f.extension === "md") this.scheduleRefresh();
+    };
+    this.registerEvent(this.app.vault.on("create", structural));
+    this.registerEvent(this.app.vault.on("delete", structural));
+    this.registerEvent(this.app.vault.on("rename", structural));
+    this.registerEvent(
+      this.app.vault.on("modify", (f) => {
+        if (f instanceof TFile && f.extension === "md") this.scheduleRefresh();
+      }),
+    );
+  }
+
+  /**
+   * Full rescan + redraw. `announce` shows the "Scanning vault…" status (used
+   * for explicit user actions: opening the view, the Re-verify button); auto
+   * refreshes pass false to stay silent. Re-entrant calls coalesce into one
+   * trailing rescan.
+   */
+  async refresh(announce = true): Promise<void> {
+    if (this.refreshing) {
+      this.refreshQueued = true;
+      return;
+    }
+    this.refreshing = true;
+    try {
+      await this.runRefresh(announce);
+    } finally {
+      this.refreshing = false;
+      if (this.refreshQueued) {
+        this.refreshQueued = false;
+        void this.refresh(false);
+      }
+    }
+  }
+
+  private async runRefresh(announce: boolean): Promise<void> {
+    if (announce) this.setSummary("Scanning vault…");
     try {
       this.rows = await scanVault(this.app);
     } catch (e) {
       console.error("[knobe-lens] scan failed:", e);
-      this.summaryEl.setText("Scan failed — see the developer console.");
+      this.setSummary("Scan failed — see the developer console.");
       return;
     }
 
@@ -114,9 +170,15 @@ export class KnobeLensView extends ItemView {
     else this.detailEl.empty();
   }
 
+  /** Update the live-region summary only when the text actually changes, so a
+   *  silent auto-refresh to an unchanged vault doesn't re-announce to AT. */
+  private setSummary(text: string): void {
+    if (this.summaryEl.textContent !== text) this.summaryEl.setText(text);
+  }
+
   private renderSummary(): void {
     if (this.rows.length === 0) {
-      this.summaryEl.setText("No .knobe.md objects found in this vault yet.");
+      this.setSummary("No sealed KNOBE notes found in this vault yet.");
       return;
     }
     const counts: Record<Status, number> = { verified: 0, "verified-body-modified": 0, failed: 0, unreadable: 0 };
@@ -125,7 +187,7 @@ export class KnobeLensView extends ItemView {
       counts[r.result.state]++;
       if (r.quarantine === "quarantine") quarantined++;
     }
-    this.summaryEl.setText(
+    this.setSummary(
       `${counts.verified} verified · ${counts["verified-body-modified"]} body-modified · ` +
         `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined`,
     );
