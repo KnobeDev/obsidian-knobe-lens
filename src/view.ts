@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, Notice, debounce, setIcon } from "obsidian";
 import type KnobeLensPlugin from "./main";
-import { scanVault, ScanRow } from "./scanner";
+import { scanVault, ScanRow, findUnindexedKnobeFiles } from "./scanner";
 import { Status, extractBodyText } from "./lens-core";
 import { diagnoseBreak } from "./diagnose";
 import { lineDiff } from "./diff";
@@ -35,6 +35,9 @@ export class KnobeLensView extends ItemView {
   private lineageEl!: HTMLElement;
   private portfoliosEl!: HTMLElement;
   private summaryEl!: HTMLElement;
+  // Persistent notice for KNOBE files found on disk but not in Obsidian's index
+  // (populated only by an explicit deep Rescan).
+  private noticeEl!: HTMLElement;
   // Dedicated polite live region for the result of explicit actions (a move, a
   // folder creation). Kept separate from summaryEl so a transient "Moved…" never
   // clobbers the persistent vault tally and is never re-announced on a silent
@@ -45,6 +48,10 @@ export class KnobeLensView extends ItemView {
   // single trailing rescan instead of interleaving two passes over the vault.
   private refreshing = false;
   private refreshQueued = false;
+  private refreshQueuedDeep = false;
+  // True between onOpen and onClose, so a deferred onLayoutReady callback can't
+  // touch detached DOM after the view is closed.
+  private mounted = false;
 
   // Coalesce bursts of vault events (bulk move, save storms, reseal-on-save)
   // into a single silent rescan ~400ms after the burst begins, capping rescan
@@ -66,15 +73,16 @@ export class KnobeLensView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.mounted = true;
     const root = this.contentEl;
     root.empty();
     root.addClass("knobe-lens");
 
     const header = root.createDiv({ cls: "knobe-lens-header" });
     header.createEl("h3", { text: "KNOBE Lens" });
-    const refresh = header.createEl("button", { text: "Re-verify" });
-    refresh.setAttr("aria-label", "Re-verify all KNOBEs in the vault");
-    refresh.onclick = () => void this.refresh();
+    const refresh = header.createEl("button", { text: "Rescan" });
+    refresh.setAttr("aria-label", "Rescan the vault for KNOBE documents and re-verify all of them");
+    refresh.onclick = () => void this.refresh(true, true); // explicit Rescan = deep disk reconcile
 
     const report = header.createEl("button", { text: "Verify a document…" });
     report.setAttr("aria-label", "Submit a document for verification and create a report");
@@ -86,6 +94,7 @@ export class KnobeLensView extends ItemView {
     });
 
     this.summaryEl = root.createEl("p", { cls: "knobe-lens-summary", attr: { role: "status", "aria-live": "polite" } });
+    this.noticeEl = root.createDiv({ cls: "knobe-lens-notice" });
     this.actionStatusEl = root.createEl("p", {
       cls: "knobe-lens-action-status knobe-lens-sr-only",
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
@@ -108,7 +117,15 @@ export class KnobeLensView extends ItemView {
     this.portfoliosEl = root.createDiv({ cls: "knobe-lens-portfolios" });
 
     this.registerVaultAutoRefresh();
-    await this.refresh();
+    // Defer the first scan to layout-ready. A view restored at Obsidian startup
+    // can run onOpen before the vault finishes indexing, so getMarkdownFiles()
+    // would miss documents added while the app was closed — and no vault event
+    // fires afterward to correct it. onLayoutReady runs immediately when the
+    // workspace is already ready (manual open) or once indexing completes.
+    // onLayoutReady isn't a registerEvent ref; guard against firing post-close.
+    this.app.workspace.onLayoutReady(() => {
+      if (this.mounted) void this.refresh();
+    });
   }
 
   /**
@@ -136,28 +153,34 @@ export class KnobeLensView extends ItemView {
 
   /**
    * Full rescan + redraw. `announce` shows the "Scanning vault…" status (used
-   * for explicit user actions: opening the view, the Re-verify button); auto
-   * refreshes pass false to stay silent. Re-entrant calls coalesce into one
-   * trailing rescan.
+   * for explicit user actions: opening the view, the Rescan button); auto
+   * refreshes pass false to stay silent. `deep` additionally reconciles against
+   * the filesystem to surface KNOBE files Obsidian's index missed — only the
+   * explicit Rescan button sets it, since it reads the disk directly. Re-entrant
+   * calls coalesce into one trailing rescan.
    */
-  async refresh(announce = true): Promise<void> {
+  async refresh(announce = true, deep = false): Promise<void> {
     if (this.refreshing) {
       this.refreshQueued = true;
+      if (deep) this.refreshQueuedDeep = true; // don't lose a Rescan behind a running scan
       return;
     }
     this.refreshing = true;
     try {
-      await this.runRefresh(announce);
+      await this.runRefresh(announce, deep);
     } finally {
       this.refreshing = false;
       if (this.refreshQueued) {
         this.refreshQueued = false;
-        void this.refresh(false);
+        const pendingDeep = this.refreshQueuedDeep;
+        this.refreshQueuedDeep = false;
+        void this.refresh(false, pendingDeep);
       }
     }
   }
 
-  private async runRefresh(announce: boolean): Promise<void> {
+  private async runRefresh(announce: boolean, deep = false): Promise<void> {
+    this.noticeEl.empty(); // clear any stale disk-reconcile notice; re-filled only on a deep scan
     if (announce) this.setSummary("Scanning vault…");
     try {
       this.rows = await scanVault(this.app);
@@ -166,6 +189,8 @@ export class KnobeLensView extends ItemView {
       this.setSummary("Scan failed — see the developer console.");
       return;
     }
+
+    if (deep) await this.renderDiskNotice();
 
     // Stage last-verified snapshots, then persist once (not per file).
     let dirty = false;
@@ -196,6 +221,33 @@ export class KnobeLensView extends ItemView {
    *  from user-initiated handlers — never from a background rescan. */
   private setActionStatus(text: string): void {
     if (this.actionStatusEl.textContent !== text) this.actionStatusEl.setText(text);
+  }
+
+  /** Reconcile against the filesystem and warn about KNOBE files Obsidian hasn't
+   *  indexed (e.g. added by another app). Only runs on an explicit deep Rescan. */
+  private async renderDiskNotice(): Promise<void> {
+    this.noticeEl.empty();
+    let found;
+    try {
+      found = await findUnindexedKnobeFiles(this.app);
+    } catch (e) {
+      console.error("[knobe-lens] disk reconcile failed:", e);
+      return;
+    }
+    if (found.paths.length === 0) return;
+
+    const n = found.paths.length;
+    const box = this.noticeEl.createDiv({ cls: "knobe-lens-warn", attr: { role: "status" } });
+    box.createEl("strong", {
+      text: `${n}${found.capped ? "+" : ""} KNOBE file(s) on disk aren’t loaded by Obsidian yet.`,
+    });
+    box.createEl("div", {
+      cls: "knobe-lens-muted",
+      text: "Likely added outside Obsidian. Open each once, or reopen the vault to load them, then Rescan.",
+    });
+    const ul = box.createEl("ul", { cls: "knobe-lens-notice-list" });
+    for (const p of found.paths.slice(0, 10)) ul.createEl("li", { text: p });
+    if (n > 10) box.createEl("div", { cls: "knobe-lens-muted", text: `…and ${n - 10} more.` });
   }
 
   private renderSummary(): void {
@@ -405,15 +457,17 @@ export class KnobeLensView extends ItemView {
     titleWrap.createDiv({ text: `${row.file.path} · ${row.contentType}`, cls: "knobe-lens-path" });
     this.stateBadge(head.createDiv(), row.result.state);
 
+    const p = row.result.payload ?? {};
+    // 0.1 envelopes store the hash in integrity.sha256, not a payload_hash field.
+    const hashField = "integrity" in p && !("payload_hash" in p) ? "integrity.sha256" : "payload_hash";
     const hashLine = d.createDiv({ cls: "knobe-lens-hash" });
     if (row.result.state === "failed") {
-      hashLine.createSpan({ text: "payload_hash mismatch: ", cls: "knobe-lens-bad" });
+      hashLine.createSpan({ text: `${hashField} mismatch: `, cls: "knobe-lens-bad" });
       hashLine.createSpan({ text: `computed ${short(row.result.computed)} != stored ${short(row.result.stored)}` });
     } else {
-      hashLine.createSpan({ text: `payload_hash ${short(row.result.stored)}` });
+      hashLine.createSpan({ text: `${hashField} ${short(row.result.stored)}` });
     }
 
-    const p = row.result.payload ?? {};
     const fieldTable = d.createEl("table", { cls: "knobe-lens-fields", attr: { role: "presentation" } });
     for (const key of ["summary", "fidelity_limits", "use_conditions", "accessibility", "attribution", "parents"]) {
       if (!Object.prototype.hasOwnProperty.call(p, key)) continue;
@@ -525,7 +579,7 @@ export class KnobeLensView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    /* nothing to clean up */
+    this.mounted = false;
   }
 }
 

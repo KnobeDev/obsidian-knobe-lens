@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { verify, hasKnobeMarker } from "./lens-core";
+import { verify, hasKnobeMarker, KNOBE_BEGIN_B64 } from "./lens-core";
 import { isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
 import { sealKnobe, splitNote, SealFields } from "./seal";
@@ -135,9 +135,19 @@ export default class KnobeLensPlugin extends Plugin {
     return sealKnobe(this.ensureFrontmatter(frontmatter, fields), body, fields, { embedBody });
   }
 
+  /** A note carrying a non-B64 KNOBE envelope (e.g. the KNOBE.AI 0.1 HTML format)
+   *  that the B64 sealer must never overwrite — doing so would corrupt it. */
+  private isForeignKnobe(raw: string): boolean {
+    return raw.includes("KNOBE_PAYLOAD_START") && !raw.includes(KNOBE_BEGIN_B64);
+  }
+
   async sealFile(file: TFile): Promise<void> {
     try {
       const raw = await this.app.vault.read(file);
+      if (this.isForeignKnobe(raw)) {
+        new Notice("This note is a KNOBE.AI 0.1 object; KNOBE Lens seals the PEM/B64 format. Re-sealing would corrupt it.");
+        return;
+      }
       const sealed = await this.buildSealed(file, raw);
       const title = this.fieldsFor(file).title;
       if (sealed !== raw) {
@@ -158,6 +168,10 @@ export default class KnobeLensPlugin extends Plugin {
   async promote(file: TFile): Promise<void> {
     try {
       const raw = await this.app.vault.read(file);
+      if (this.isForeignKnobe(raw)) {
+        new Notice("Cannot promote: this is a KNOBE.AI 0.1 object, which this tool can't re-seal.");
+        return;
+      }
       const current = await verify(raw);
       if (current.state !== "verified") {
         new Notice("Cannot promote: the seal is not intact. Inspect or re-seal first.");
@@ -192,11 +206,13 @@ export default class KnobeLensPlugin extends Plugin {
   private async resealIfKnobe(file: TFile): Promise<void> {
     try {
       const raw = await this.app.vault.read(file);
-      if (!hasKnobeMarker(raw)) return;
-      // Only re-seal notes that already carry an intact B64 seal. The marker
-      // prefilter now also matches legacy/unsupported variants (e.g. a non-1.0
-      // knote); re-sealing one would silently rewrite it as 1.0 and corrupt the
-      // author's object. Reseal exists to keep a working seal valid — nothing else.
+      // Reseal only ever applies to the PEM/B64 format the sealer produces. The
+      // marker prefilter also matches legacy bare-B variants and the KNOBE.AI 0.1
+      // HTML envelope; re-sealing one of those would rewrite it as a 1.0 B64 seal
+      // and corrupt the author's object. Require a real B64 block before going on.
+      if (!raw.includes(KNOBE_BEGIN_B64)) return;
+      // Only re-seal notes whose existing B64 seal is intact — never launder a
+      // broken/unsupported one. Reseal exists to keep a working seal valid.
       const state = (await verify(raw)).state;
       if (state !== "verified" && state !== "verified-body-modified") return;
       const sealed = await this.buildSealed(file, raw);

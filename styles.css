@@ -234,6 +234,30 @@ h5.knobe-lens-section {
   padding-left: 18px;
 }
 
+/* disk-reconcile notice (files Obsidian hasn't indexed) */
+.knobe-lens-notice:empty {
+  display: none;
+}
+.knobe-lens-warn {
+  font-size: 12px;
+  padding: 8px 10px;
+  margin: 8px 0 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--color-yellow);
+  background: var(--background-secondary);
+}
+.knobe-lens-warn strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.knobe-lens-notice-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* move-to-portfolio control */
 .knobe-lens-move {
   max-width: 160px;
