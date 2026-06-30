@@ -4,6 +4,27 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-06-30
+
+### Added
+
+- **Portfolios organise filed work, and filed objects leave the main list.** Once
+  an object is filed anywhere under the portfolio root, it moves out of the main
+  verification table (the summary shows a `· N filed` tally) and into the
+  **Portfolios** section, grouped by subject folder — each file shown with its
+  status badge, click-to-open, and a re-file dropdown to move it between subjects.
+  Filed objects stay reachable through *"Verify a document…"*, and re-seal after
+  editing via the detail pane.
+
+### Fixed
+
+- **Filing a document into a new folder now actually moves the file.** Creating a
+  portfolio folder and moving a note into it both used to re-fetch the
+  just-created folder from Obsidian's index immediately after creating it, which
+  races index registration and failed — leaving an empty folder and the note in
+  place. Both now work off the folder path directly, so create-then-file is
+  atomic and reliable.
+
 ## [0.4.0] - 2026-06-30
 
 ### Added
@@ -123,6 +144,7 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.5.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.5.0
 [0.4.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.4.0
 [0.3.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.3.0
 [0.2.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.2.0
