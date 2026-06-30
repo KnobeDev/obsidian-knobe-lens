@@ -318,9 +318,12 @@ export default class KnobeLensPlugin extends Plugin {
     return listPortfolioFolders(this.portfolioRootFolder());
   }
 
-  /** Create a portfolio folder under the root (lazily creating the root).
-   *  Throws an Error with a user-facing message on collision/failure. */
-  async createPortfolioFolder(rawName: string): Promise<TFolder> {
+  /** Create a portfolio folder under the root (lazily creating the root) and
+   *  return its vault path. Returns the path string rather than re-fetching the
+   *  TFolder from the index — that re-fetch can race the index registration and
+   *  spuriously fail right after the folder is created on disk. Throws an Error
+   *  with a user-facing message on collision/failure. */
+  async createPortfolioFolder(rawName: string): Promise<string> {
     // Re-sanitise here too: this is the plugin's public method, reachable by
     // callers other than the modal — never trust the name to be clean.
     const name = sanitizePortfolioName(rawName);
@@ -334,22 +337,20 @@ export default class KnobeLensPlugin extends Plugin {
       throw new Error(`A portfolio named "${name}" already exists.`);
     }
     await this.app.vault.createFolder(path);
-    const created = this.app.vault.getAbstractFileByPath(path);
-    if (!isFolder(created)) throw new Error("Could not create the portfolio folder.");
-    return created;
+    return path;
   }
 
-  /** Move a file into a portfolio folder, updating inbound links. No-op if the
-   *  file is already there. Throws with a user-facing message on conflict. The
-   *  resulting vault 'rename' event drives the dashboard's own auto-refresh — this
-   *  method deliberately does not touch the view. */
+  /** Move a file into the portfolio folder at `folderPath`, updating inbound
+   *  links. No-op if it's already there. Works off the path directly (the folder
+   *  exists on disk — just created or chosen from the index) so it can't race the
+   *  index registration. The resulting vault 'rename' event drives the dashboard's
+   *  auto-refresh — this method deliberately does not touch the view. */
   async moveToPortfolio(file: TFile, folderPath: string): Promise<void> {
-    const folder = this.app.vault.getAbstractFileByPath(folderPath);
-    if (!isFolder(folder)) throw new Error("That portfolio folder no longer exists.");
-    if (file.parent?.path === folder.path) return;
-    const target = targetPathFor(folder, file);
+    if (file.parent?.path === folderPath) return;
+    const target = targetPathFor(folderPath, file.name);
     if (this.app.vault.getAbstractFileByPath(target)) {
-      throw new Error(`A file named "${file.name}" already exists in "${folder.name}".`);
+      const folderName = folderPath.split("/").pop() ?? folderPath;
+      throw new Error(`A file named "${file.name}" already exists in "${folderName}".`);
     }
     await this.app.fileManager.renameFile(file, target);
   }

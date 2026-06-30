@@ -7,7 +7,7 @@ import { lineDiff } from "./diff";
 import { buildLineage } from "./lineage";
 import { renderLineage } from "./lineage-render";
 import { getVerdict } from "./trust";
-import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE } from "./portfolio";
+import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
@@ -250,27 +250,50 @@ export class KnobeLensView extends ItemView {
     if (n > 10) box.createEl("div", { cls: "knobe-lens-muted", text: `…and ${n - 10} more.` });
   }
 
+  /** A file filed under the portfolio root — shown in the Portfolios section, not
+   *  the main list. */
+  private isFiled(row: ScanRow): boolean {
+    return isFiledUnder(row.file.path, this.plugin.settings.portfolioRoot);
+  }
+
   private renderSummary(): void {
     if (this.rows.length === 0) {
       this.setSummary("No sealed KNOBE notes found in this vault yet.");
       return;
     }
+    const unfiled = this.rows.filter((r) => !this.isFiled(r));
+    const filed = this.rows.length - unfiled.length;
+    if (unfiled.length === 0) {
+      this.setSummary(`All ${this.rows.length} KNOBE${this.rows.length === 1 ? "" : "s"} filed in portfolios.`);
+      return;
+    }
     const counts: Record<Status, number> = { verified: 0, "verified-body-modified": 0, failed: 0, unreadable: 0 };
     let quarantined = 0;
-    for (const r of this.rows) {
+    for (const r of unfiled) {
       counts[r.result.state]++;
       if (r.quarantine === "quarantine") quarantined++;
     }
     this.setSummary(
       `${counts.verified} verified · ${counts["verified-body-modified"]} body-modified · ` +
-        `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined`,
+        `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined` +
+        (filed ? ` · ${filed} filed` : ""),
     );
   }
 
   private renderTable(): void {
     this.tableBody.empty();
     this.rowTriggers.clear();
-    this.rows.forEach((row, index) => {
+    const rows = this.rows.filter((r) => !this.isFiled(r)); // filed objects live in the Portfolios section
+    if (rows.length === 0) {
+      const tr = this.tableBody.createEl("tr");
+      tr.createEl("td", {
+        attr: { colspan: "6" },
+        cls: "knobe-lens-muted",
+        text: this.rows.length ? "All KNOBEs are filed in portfolios (below)." : "No KNOBEs yet.",
+      });
+      return;
+    }
+    rows.forEach((row, index) => {
       const tr = this.tableBody.createEl("tr", { cls: "knobe-lens-row" });
 
       // First cell carries a real button so native keyboard semantics apply and
@@ -290,7 +313,7 @@ export class KnobeLensView extends ItemView {
       const verdict = getVerdict(this.plugin.trust, row.payloadHash);
       tr.createEl("td", { text: verdict ? `you: ${verdict.verdict}` : "—" });
 
-      this.renderMoveControl(tr.createEl("td"), row, index);
+      this.renderMoveControl(tr.createEl("td"), row, `t${index}`);
 
       tr.toggleClass("is-selected", row.file.path === this.selectedPath);
     });
@@ -302,10 +325,9 @@ export class KnobeLensView extends ItemView {
    * locally marked the object "trusted" — otherwise it is truly disabled with a
    * visible, programmatically-associated reason (never colour alone, SC 1.4.1).
    */
-  private renderMoveControl(td: HTMLElement, row: ScanRow, index: number): void {
-    const id = `${index}`;
-    const selId = `kl-move-${id}`;
-    const helpId = `kl-move-help-${id}`;
+  private renderMoveControl(td: HTMLElement, row: ScanRow, idSuffix: string): void {
+    const selId = `kl-move-${idSuffix}`;
+    const helpId = `kl-move-help-${idSuffix}`;
 
     // Hidden label carries the object title so each row's control is
     // distinguishable and voice-addressable ("Move '<title>' to portfolio").
@@ -339,9 +361,9 @@ export class KnobeLensView extends ItemView {
         new NewFolderModal(this.app, {
           onSubmit: async (name) => {
             try {
-              const folder = await this.plugin.createPortfolioFolder(name);
-              await this.plugin.moveToPortfolio(row.file, folder.path);
-              await this.afterMove(row, folder.name);
+              const path = await this.plugin.createPortfolioFolder(name);
+              await this.plugin.moveToPortfolio(row.file, path);
+              await this.afterMove(row, path.split("/").pop() ?? name);
               return null;
             } catch (e) {
               return errorMessage(e);
@@ -387,25 +409,28 @@ export class KnobeLensView extends ItemView {
     if (folders.length === 0) {
       c.createEl("p", {
         cls: "knobe-lens-muted",
-        text: "No portfolios yet. Mark an object trusted, then use its “Move to portfolio” control to file it.",
+        text: "No portfolios yet. Trust an object, then use its “Move to portfolio” control to file it under a subject folder.",
       });
       return;
     }
     const list = c.createEl("ul", { cls: "knobe-lens-portfolio-list" });
-    for (const folder of folders) {
+    folders.forEach((folder, fi) => {
       const li = list.createEl("li", { cls: "knobe-lens-portfolio" });
-      li.createEl("h5", { text: folder.name, cls: "knobe-lens-section" });
       const members = this.rows.filter((r) => r.file.parent?.path === folder.path);
+      li.createEl("h5", { text: `${folder.name} (${members.length})`, cls: "knobe-lens-section" });
       if (members.length === 0) {
         li.createEl("p", { cls: "knobe-lens-muted", text: "No KNOBEs filed here yet." });
-        continue;
+        return;
       }
       const inner = li.createEl("ul", { cls: "knobe-lens-portfolio-members" });
-      for (const r of members) {
-        const trigger = inner.createEl("li").createEl("button", { cls: "knobe-lens-row-trigger", text: r.title });
+      members.forEach((r, mi) => {
+        const mli = inner.createEl("li", { cls: "knobe-lens-portfolio-member" });
+        this.stateBadge(mli.createSpan({ cls: "knobe-lens-member-badge" }), r.result.state);
+        const trigger = mli.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-member-title", text: r.title });
         trigger.onclick = () => void this.select(r);
-      }
-    }
+        this.renderMoveControl(mli.createDiv({ cls: "knobe-lens-member-move" }), r, `p${fi}-${mi}`);
+      });
+    });
   }
 
   private stateBadge(parent: HTMLElement, state: Status): void {

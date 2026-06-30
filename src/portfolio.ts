@@ -54,7 +54,13 @@ export function portfolioPath(rootPath: string, name: string): string {
   return `${rootPath}/${name}`;
 }
 
-/** Destination path for moving `file` into `folder`. */
-export function targetPathFor(folder: TFolder, file: TFile): string {
-  return `${folder.path}/${file.name}`;
+/** Destination path for moving a file named `fileName` into `folderPath`. */
+export function targetPathFor(folderPath: string, fileName: string): string {
+  return `${folderPath}/${fileName}`;
+}
+
+/** True when a file lives anywhere inside the portfolio root — i.e. it has been
+ *  "filed". Filed objects move out of the main list into the Portfolios section. */
+export function isFiledUnder(filePath: string, rootPath: string): boolean {
+  return filePath.startsWith(`${rootPath}/`);
 }
