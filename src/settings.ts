@@ -11,6 +11,7 @@ export interface KnobeLensSettings {
   defaultSummary: string;
   resealOnSave: boolean;
   embedBodySnapshot: boolean;
+  portfolioRoot: string;
 }
 
 export const DEFAULT_SETTINGS: KnobeLensSettings = {
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: KnobeLensSettings = {
   defaultSummary: "",
   resealOnSave: false,
   embedBodySnapshot: false,
+  portfolioRoot: "KNOBE Portfolios",
 };
 
 const CONTENT_TYPES = ["original", "synthesis", "adaptation", "compression", "annotation", "seed", "collection", "translation"];
@@ -68,6 +70,19 @@ export class KnobeLensSettingTab extends PluginSettingTab {
     dropdown("Content type", "Default content_type", CONTENT_TYPES, () => s.contentType, (v) => (s.contentType = v));
     dropdown("Privacy level", "Default privacy_level", PRIVACY, () => s.privacyLevel, (v) => (s.privacyLevel = v));
     dropdown("Quarantine status", "Default declared quarantine_status (quarantine-first is recommended)", QUARANTINE, () => s.quarantineStatus, (v) => (s.quarantineStatus = v));
+
+    containerEl.createEl("h3", { text: "Portfolios" });
+    text(
+      "Portfolio root folder",
+      "Vault folder that holds your portfolio subfolders. Trusted objects can be filed into these from the dashboard.",
+      () => s.portfolioRoot,
+      // Allow `/` and `\` (nested root like "Notes/Portfolios"); reject the rest
+      // of the Windows-illegal set and fall back to the default if unusable.
+      (v) => {
+        const trimmed = v.trim();
+        s.portfolioRoot = (!trimmed || /[*?"<>|]/.test(trimmed)) ? DEFAULT_SETTINGS.portfolioRoot : trimmed;
+      },
+    );
 
     containerEl.createEl("h3", { text: "Save behavior" });
     new Setting(containerEl)

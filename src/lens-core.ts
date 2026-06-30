@@ -32,7 +32,13 @@ export interface LensResult {
   reason: string | null;
 }
 
-const SUPPORTED_SPEC_VERSIONS = new Set(["1.0"]);
+// The only finalized KNOBE spec version. Per the protocol authors, present
+// non-1.0 labels (2.9, 3.0, …) are premature: the on-disk format is 1.0, so
+// every object is verified under 1.0 rules regardless of its declared version.
+// This is safe against false positives — a genuinely different canonicalization
+// produces a mismatched hash ("failed"), never a spurious "verified". Non-1.0
+// labels are surfaced as a conformance warning so the normalization is visible.
+const FINALIZED_SPEC_VERSION = "1.0";
 
 const REQUIRED = ["spec_version", "title", "summary", "content_type", "created_date",
   "license", "privacy_level", "quarantine_status", "attribution", "payload_hash"];
@@ -50,8 +56,39 @@ const CANONICAL_VOCAB: Record<string, Set<string>> = {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const BLOCK_RE = /(?:^|\n)-----BEGIN KNOBE B64-----\n([\s\S]*?)\n-----END KNOBE B64-----/g;
-const BODY_MARKER = "\n-----BEGIN KNOBE B64-----\n";
+
+// Canonical block markers. The verifier ONLY treats the B64 form as sealed.
+export const KNOBE_BEGIN_B64 = "-----BEGIN KNOBE B64-----";
+export const KNOBE_END_B64 = "-----END KNOBE B64-----";
+
+// Block matching tolerates CR (`\r\n` and the doubled `\r\r\n` some exporters
+// emit): every `\r*` matches the empty string on pure-LF input, so the 9
+// reference vectors are byte-for-byte unaffected. The base64 body itself has all
+// whitespace stripped before decode, so stray CR inside the payload is moot.
+const BLOCK_RE = /(?:^|\r*\n)-----BEGIN KNOBE B64-----\r*\n([\s\S]*?)\r*\n-----END KNOBE B64-----/g;
+// Legacy/non-B64 marker (older or newer spec variants). Detected ONLY to surface
+// such objects in the dashboard with a reason — never accepted as a sealed block.
+const BARE_BLOCK_RE = /(?:^|\r*\n)-----BEGIN KNOBE B-----\r*\n([\s\S]*?)\r*\n-----END KNOBE B-----/g;
+// Body extraction marker, CR-tolerant. Used via lastBodyMarkerStart().
+const BODY_MARKER_RE = /\r*\n-----BEGIN KNOBE B64-----\r*\n/g;
+
+// Cheap prefilter for "could this note contain a KNOBE block?" — matches both the
+// canonical B64 marker and the bare-B legacy variant, so unverifiable objects are
+// still SURFACED (visible in the dashboard) rather than silently skipped. This is
+// intentionally more lenient than BLOCK_RE: lenient for discovery, strict for
+// verification. Single source of truth shared by the scanner and the plugin.
+const KNOBE_MARKER_RE = /-----BEGIN KNOBE B(?:64)?-----/;
+export const hasKnobeMarker = (raw: string): boolean => KNOBE_MARKER_RE.test(raw);
+
+/** Index of the last body marker (start of the `\r*\n` run), or -1. CR-tolerant
+ *  replacement for `raw.lastIndexOf(BODY_MARKER)`. */
+function lastBodyMarkerStart(raw: string): number {
+  const re = new RegExp(BODY_MARKER_RE.source, "g");
+  let idx = -1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) idx = m.index;
+  return idx;
+}
 
 class DuplicateKeyError extends Error {}
 
@@ -298,6 +335,11 @@ function checkConformance(
     warnings.push(`frontmatter spec_version '${fmSpec}' does not match sealed payload spec_version '${payload.spec_version}'`);
   }
 
+  const sv = payload.spec_version;
+  if (typeof sv === "string" && sv !== FINALIZED_SPEC_VERSION) {
+    warnings.push(`spec_version '${sv}' is not a finalized KNOBE version; verified under ${FINALIZED_SPEC_VERSION} rules`);
+  }
+
   for (const mm of missing) errors.push(`required field missing: ${mm}`);
 
   for (const field of STRING_FIELDS) {
@@ -387,11 +429,30 @@ export async function bodyHashOf(bodyText: string, applyNfc = false): Promise<st
 /** Extract the body text the verifier hashes: between the frontmatter close and
  *  the last payload marker. Returns null when not extractable. */
 export function extractBodyText(raw: string): string | null {
-  const markerIdx = raw.lastIndexOf(BODY_MARKER);
+  const markerIdx = lastBodyMarkerStart(raw);
   if (markerIdx < 0) return null;
   const pre = raw.slice(0, markerIdx);
   const start = findBodyStart(pre);
   return start === null ? null : pre.slice(start);
+}
+
+/** Decode the last bare-B (non-B64) block's JSON payload, or null. Used only to
+ *  surface unverifiable legacy/variant objects with a meaningful title/reason.
+ *  Assumes the same base64 encoding as B64 blocks; a raw-JSON or otherwise-encoded
+ *  variant returns null and the file surfaces as "no payload block found". */
+function tryDecodeBareBlock(raw: string): Record<string, unknown> | null {
+  const re = new RegExp(BARE_BLOCK_RE.source, "g");
+  let last: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) last = m[1];
+  if (last === null) return null;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(decodeBase64Strict(last));
+    const parsed = parseStrictJson(text);
+    return isObj(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /* ---- public entry point ---- */
@@ -401,7 +462,19 @@ export async function verify(raw: string): Promise<LensResult> {
   const re = new RegExp(BLOCK_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) blocks.push(m[1]);
-  if (blocks.length === 0) return unreadable("no payload block found", 0);
+  if (blocks.length === 0) {
+    // No canonical B64 block. If a bare-B (legacy/variant) block is present,
+    // surface it as unreadable with its declared spec_version and payload so the
+    // dashboard shows the real title and reason instead of hiding the file.
+    const bare = tryDecodeBareBlock(raw);
+    if (bare) {
+      const reason = typeof bare.payload_hash === "string"
+        ? "legacy KNOBE block (non-B64 marker); re-seal this note to verify under the current format"
+        : "KNOBE block has no payload_hash (unsealed/legacy); re-seal this note to verify";
+      return unreadable(reason, 0, bare);
+    }
+    return unreadable("no payload block found", 0);
+  }
 
   let payload: Record<string, unknown>;
   try {
@@ -415,13 +488,6 @@ export async function verify(raw: string): Promise<LensResult> {
   }
 
   if (findNfcCollisions(payload).length) return unreadable("payload keys collide under NFC normalization", blocks.length, payload);
-
-  const sv = payload.spec_version;
-  if (sv !== undefined && !(typeof sv === "string" && SUPPORTED_SPEC_VERSIONS.has(sv))) {
-    const r = unreadable(`unsupported spec_version`, blocks.length, payload);
-    r.conformanceIssues = [`unsupported spec_version (this verifier supports 1.0)`];
-    return r;
-  }
 
   const stored = typeof payload.payload_hash === "string" ? payload.payload_hash : "";
   const computed = await payloadHashOf(payload);
@@ -439,7 +505,7 @@ export async function verify(raw: string): Promise<LensResult> {
   let body: "match" | "mismatch" | null = null;
   let bodyVerified: BodyVerified = "omitted";
   if (state === "verified" && "body_hash" in payload && blocks.length === 1) {
-    const markerIdx = raw.lastIndexOf(BODY_MARKER);
+    const markerIdx = lastBodyMarkerStart(raw);
     if (markerIdx >= 0) {
       const pre = raw.slice(0, markerIdx);
       const bodyStart = findBodyStart(pre);

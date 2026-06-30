@@ -7,7 +7,7 @@
  * verify. Gated by round-trip + idempotency tests (test/seal.test.ts).
  */
 
-import { payloadHashOf, bodyHashOf } from "./lens-core";
+import { payloadHashOf, bodyHashOf, KNOBE_BEGIN_B64, KNOBE_END_B64 } from "./lens-core";
 
 export interface SealFields {
   title: string;
@@ -21,10 +21,11 @@ export interface SealFields {
   [k: string]: unknown;
 }
 
-const BEGIN = "-----BEGIN KNOBE B64-----";
-const END = "-----END KNOBE B64-----";
+const BEGIN = KNOBE_BEGIN_B64;
+const END = KNOBE_END_B64;
 // Strip a trailing payload block (and any blank lines before it) when re-sealing.
-const BLOCK_STRIP = /\n*-----BEGIN KNOBE B64-----[\s\S]*?-----END KNOBE B64-----\s*$/;
+// `[\r\n]*` tolerates CRLF blank lines so a CRLF note re-seals cleanly.
+const BLOCK_STRIP = /[\r\n]*-----BEGIN KNOBE B64-----[\s\S]*?-----END KNOBE B64-----\s*$/;
 
 /** Split a note into its YAML frontmatter and body, dropping any existing seal. */
 export function splitNote(raw: string): { frontmatter: string; body: string } {

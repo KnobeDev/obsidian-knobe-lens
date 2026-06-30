@@ -1,7 +1,5 @@
 import { App, TFile } from "obsidian";
-import { verify, LensResult } from "./lens-core";
-
-const MARKER = "-----BEGIN KNOBE B64-----";
+import { verify, LensResult, hasKnobeMarker } from "./lens-core";
 
 export interface ScanRow {
   file: TFile;
@@ -30,7 +28,7 @@ export async function scanVault(app: App): Promise<ScanRow[]> {
   const rows: ScanRow[] = [];
   for (const file of app.vault.getMarkdownFiles()) {
     const raw = await app.vault.cachedRead(file);
-    if (!raw.includes(MARKER)) continue;
+    if (!hasKnobeMarker(raw)) continue;
     const result = await verify(raw);
     const p = result.payload ?? {};
     rows.push({

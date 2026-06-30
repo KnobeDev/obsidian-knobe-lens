@@ -1,5 +1,6 @@
-import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
-import { verify } from "./lens-core";
+import { Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { verify, hasKnobeMarker } from "./lens-core";
+import { isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
 import { sealKnobe, splitNote, SealFields } from "./seal";
 import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./settings";
@@ -7,12 +8,12 @@ import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./tr
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
 import { scanVault } from "./scanner";
 
-const MARKER = "-----BEGIN KNOBE B64-----";
 const RESEAL_DEBOUNCE_MS = 900;
 const HEX64 = /^[0-9a-f]{64}$/;
 const SETTINGS_KEYS: (keyof KnobeLensSettings)[] = [
   "author", "contribution", "license", "contentType",
   "privacyLevel", "quarantineStatus", "defaultSummary", "resealOnSave",
+  "embedBodySnapshot", "portfolioRoot",
 ];
 
 interface Snapshot {
@@ -191,7 +192,13 @@ export default class KnobeLensPlugin extends Plugin {
   private async resealIfKnobe(file: TFile): Promise<void> {
     try {
       const raw = await this.app.vault.read(file);
-      if (!raw.includes(MARKER)) return;
+      if (!hasKnobeMarker(raw)) return;
+      // Only re-seal notes that already carry an intact B64 seal. The marker
+      // prefilter now also matches legacy/unsupported variants (e.g. a non-1.0
+      // knote); re-sealing one would silently rewrite it as 1.0 and corrupt the
+      // author's object. Reseal exists to keep a working seal valid — nothing else.
+      const state = (await verify(raw)).state;
+      if (state !== "verified" && state !== "verified-body-modified") return;
       const sealed = await this.buildSealed(file, raw);
       if (sealed !== raw) await this.app.vault.modify(file, sealed); // idempotent -> no loop
     } catch (e) {
@@ -282,6 +289,55 @@ export default class KnobeLensPlugin extends Plugin {
     await this.persist();
   }
 
+  /* ---- portfolios (real vault folders under a configurable root) ---- */
+
+  /** The configured portfolio root folder, or null if it doesn't exist yet. */
+  portfolioRootFolder(): TFolder | null {
+    const f = this.app.vault.getAbstractFileByPath(this.settings.portfolioRoot);
+    return isFolder(f) ? f : null;
+  }
+
+  /** Immediate portfolio subfolders, sorted; empty if the root doesn't exist. */
+  portfolioFolders(): TFolder[] {
+    return listPortfolioFolders(this.portfolioRootFolder());
+  }
+
+  /** Create a portfolio folder under the root (lazily creating the root).
+   *  Throws an Error with a user-facing message on collision/failure. */
+  async createPortfolioFolder(rawName: string): Promise<TFolder> {
+    // Re-sanitise here too: this is the plugin's public method, reachable by
+    // callers other than the modal — never trust the name to be clean.
+    const name = sanitizePortfolioName(rawName);
+    if (!name) throw new Error("Enter a folder name without \\ / : * ? \" < > | characters.");
+    const root = this.settings.portfolioRoot;
+    if (!this.app.vault.getAbstractFileByPath(root)) {
+      await this.app.vault.createFolder(root);
+    }
+    const path = portfolioPath(root, name);
+    if (this.app.vault.getAbstractFileByPath(path)) {
+      throw new Error(`A portfolio named "${name}" already exists.`);
+    }
+    await this.app.vault.createFolder(path);
+    const created = this.app.vault.getAbstractFileByPath(path);
+    if (!isFolder(created)) throw new Error("Could not create the portfolio folder.");
+    return created;
+  }
+
+  /** Move a file into a portfolio folder, updating inbound links. No-op if the
+   *  file is already there. Throws with a user-facing message on conflict. The
+   *  resulting vault 'rename' event drives the dashboard's own auto-refresh — this
+   *  method deliberately does not touch the view. */
+  async moveToPortfolio(file: TFile, folderPath: string): Promise<void> {
+    const folder = this.app.vault.getAbstractFileByPath(folderPath);
+    if (!isFolder(folder)) throw new Error("That portfolio folder no longer exists.");
+    if (file.parent?.path === folder.path) return;
+    const target = targetPathFor(folder, file);
+    if (this.app.vault.getAbstractFileByPath(target)) {
+      throw new Error(`A file named "${file.name}" already exists in "${folder.name}".`);
+    }
+    await this.app.fileManager.renameFile(file, target);
+  }
+
   /* ---- view ---- */
 
   async activateView(): Promise<void> {
@@ -302,7 +358,7 @@ export default class KnobeLensPlugin extends Plugin {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") { this.statusBar.setText(""); return; }
       const raw = await this.app.vault.cachedRead(file);
-      if (!raw.includes(MARKER)) { this.statusBar.setText(""); return; }
+      if (!hasKnobeMarker(raw)) { this.statusBar.setText(""); return; }
       const r = await verify(raw);
       this.statusBar.setText(KnobeLensPlugin.STATUS_LABEL[r.state] ?? "");
     } catch (e) {
@@ -343,7 +399,7 @@ export default class KnobeLensPlugin extends Plugin {
     // dashboard scans by — not by a `.knobe.md` filename. Sealing never renames
     // a note, so a name-based filter would miss every document a user sealed.
     const hasSeal = async (f: TFile): Promise<boolean> =>
-      f.extension === "md" && (await this.app.vault.cachedRead(f)).includes(MARKER);
+      f.extension === "md" && hasKnobeMarker(await this.app.vault.cachedRead(f));
 
     const target = file ?? this.app.workspace.getActiveFile() ?? undefined;
     if (target && (await hasSeal(target))) {
