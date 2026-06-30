@@ -4,6 +4,42 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-06-30
+
+### Added
+
+- **Verifies KNOBE.AI `knobe_version 0.1` objects too.** A second, fully distinct
+  serialization — a JSON payload inside an HTML-comment / `<script>` envelope with
+  a self-describing integrity block — is now parsed and cryptographically verified
+  via its declared `claim-fields-join-v0.1` SHA-256, shown as Verified / Failed
+  just like the PEM/B64 format. Titles come from `header.title`. The sealer still
+  only writes the PEM/B64 format, and re-seal / promote now **refuse** to overwrite
+  a 0.1 object so it can't be corrupted.
+- **Deep "Rescan".** The toolbar button (renamed from "Re-verify") now also
+  reconciles against the filesystem on click, surfacing KNOBE files that exist on
+  disk but Obsidian hasn't indexed yet — in a notice listing them, so they're
+  never silently missing. Bounded (skips dot-folders, caps disk reads) and only on
+  an explicit click, never on the live auto-refresh.
+
+### Fixed
+
+- **New documents are recognised on open.** The first scan now waits for
+  `onLayoutReady`, so KNOBE notes added while Obsidian was closed appear when the
+  panel restores at startup (previously they could be missed until a manual
+  rescan).
+- **Security hardening (integrity-critical):** capped the verifiable file size and
+  switched the 0.1 envelope to linear extraction to remove super-linear regex
+  backtracking on adversarial input; the verifier now **refuses** (rather than
+  asserting "verified") when a `claim-fields-join-v0.1` value contains the join
+  separator, which would otherwise allow a separator-injection hash collision.
+  *Note for the format authors: `claim-fields-join-v0.1` is not prefix-free —
+  v0.2 should length-prefix fields or include field names in the preimage.*
+
+### Changed
+
+- The toolbar's verify button is now labelled **Rescan** (it both re-verifies and
+  discovers new documents).
+
 ## [0.3.0] - 2026-06-29
 
 ### Added
@@ -87,6 +123,7 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.4.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.4.0
 [0.3.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.3.0
 [0.2.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.2.0
 [0.1.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.1.0
