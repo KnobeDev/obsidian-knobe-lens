@@ -1,7 +1,7 @@
 {
   "id": "knobe-lens",
   "name": "KNOBE Lens",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.4.0",
   "description": "Verify and inspect sealed KNOBE Protocol v1 knowledge objects in your vault (any sealed Markdown note, conventionally named .knobe.md): integrity status, conformance, quarantine, and adaptation lineage.",
   "author": "KNOBE Protocol",
