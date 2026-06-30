@@ -34,7 +34,7 @@ export async function writeReport(
 export class KnobePickModal extends FuzzySuggestModal<TFile> {
   constructor(app: App, private files: TFile[], private onPick: (f: TFile) => void) {
     super(app);
-    this.setPlaceholder("Pick a .knobe.md document to verify");
+    this.setPlaceholder("Pick a sealed KNOBE note to verify");
   }
   getItems(): TFile[] {
     return this.files;

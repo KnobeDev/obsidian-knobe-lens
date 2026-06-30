@@ -1,8 +1,12 @@
 # KNOBE Lens
 
-An Obsidian plugin to **verify, inspect, and seal** [KNOBE Protocol v1](https://knobe.org) knowledge objects (`.knobe.md`) directly in your vault.
+An Obsidian plugin to **verify, inspect, and seal** [KNOBE Protocol v1](https://knobe.org) knowledge objects directly in your vault.
 
 KNOBE keeps a document's interpretive context — attribution, transformations, fidelity limits, use conditions, and accessibility lineage — inside the file, in plain text, hash-sealed. This plugin is both halves of the toolchain:
+
+### What counts as a KNOBE
+
+A KNOBE is **any Markdown note carrying a seal block** (`-----BEGIN KNOBE B64-----`) — identified by that marker, not by its filename. You create one by running *"Seal current note as KNOBE"* on an existing note (it appends the seal in place; it does not move or rename the file) or by dropping a sealed `.md` someone shared into your vault. They live inline among your normal notes — no separate vault or database. `.knobe.md` is a recommended **naming convention** for discoverability, never a requirement: every command (dashboard, verify, report) finds a note by its seal wherever it sits. Because the seal is keyless SHA-256 over plain text, the same file verifies outside Obsidian too — via the reference `lens.py`, or by reading the shareable report the plugin writes to `KNOBE Reports/`.
 
 - **Lens (read):** a dashboard of every KNOBE in the vault with integrity status, conformance, declared quarantine status, and your local trust verdict; a detail pane with the decoded payload; and an adaptation-lineage graph.
 - **Sealer (write):** a "Seal current note as KNOBE" command and an optional "re-seal on save" toggle. Keyless (SHA-256 integrity only — no signature, no secret).

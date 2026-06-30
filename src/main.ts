@@ -5,6 +5,7 @@ import { sealKnobe, splitNote, SealFields } from "./seal";
 import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./settings";
 import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./trust";
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
+import { scanVault } from "./scanner";
 
 const MARKER = "-----BEGIN KNOBE B64-----";
 const RESEAL_DEBOUNCE_MS = 900;
@@ -338,15 +339,20 @@ export default class KnobeLensPlugin extends Plugin {
       }
     };
 
+    // A KNOBE is identified by its seal marker — the same definition the
+    // dashboard scans by — not by a `.knobe.md` filename. Sealing never renames
+    // a note, so a name-based filter would miss every document a user sealed.
+    const hasSeal = async (f: TFile): Promise<boolean> =>
+      f.extension === "md" && (await this.app.vault.cachedRead(f)).includes(MARKER);
+
     const target = file ?? this.app.workspace.getActiveFile() ?? undefined;
-    const isKnobeName = (f: TFile) => f.extension === "md" && f.name.includes(".knobe.");
-    if (target && isKnobeName(target)) {
+    if (target && (await hasSeal(target))) {
       void run(target);
       return;
     }
-    const candidates = this.app.vault.getMarkdownFiles().filter(isKnobeName);
+    const candidates = (await scanVault(this.app)).map((row) => row.file);
     if (!candidates.length) {
-      new Notice("No .knobe.md documents found in this vault.");
+      new Notice("No sealed KNOBE notes found in this vault.");
       return;
     }
     new KnobePickModal(this.app, candidates, (f) => void run(f)).open();
