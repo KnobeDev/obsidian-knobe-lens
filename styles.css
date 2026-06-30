@@ -297,6 +297,20 @@ h5.knobe-lens-section {
 .knobe-lens-portfolio-members li {
   padding: 2px 0;
 }
+.knobe-lens-portfolio-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.knobe-lens-member-badge,
+.knobe-lens-member-move {
+  flex-shrink: 0;
+}
+.knobe-lens-member-title {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
 
 /* new-folder modal */
 .knobe-lens-field-label {

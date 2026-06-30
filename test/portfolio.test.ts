@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   sanitizePortfolioName, isFolder, listPortfolioFolders,
-  currentPortfolioName, portfolioPath, targetPathFor,
+  currentPortfolioName, portfolioPath, targetPathFor, isFiledUnder,
 } from "../src/portfolio";
 
 // Minimal structural stand-ins for Obsidian's TFolder / TFile (the helpers only
@@ -65,7 +65,18 @@ describe("currentPortfolioName", () => {
 describe("path builders", () => {
   it("portfolioPath joins root + name", () => expect(portfolioPath("Portfolios", "Drafts")).toBe("Portfolios/Drafts"));
   it("targetPathFor joins folder path + file name", () => {
-    expect(targetPathFor(folder("Portfolios/Drafts", "Drafts") as any, file("x/n.md", "n.md") as any))
-      .toBe("Portfolios/Drafts/n.md");
+    expect(targetPathFor("Portfolios/Drafts", "n.md")).toBe("Portfolios/Drafts/n.md");
+  });
+});
+
+describe("isFiledUnder", () => {
+  it("is true for a file anywhere under the portfolio root", () => {
+    expect(isFiledUnder("KNOBE Portfolios/Subject/n.md", "KNOBE Portfolios")).toBe(true);
+    expect(isFiledUnder("KNOBE Portfolios/n.md", "KNOBE Portfolios")).toBe(true);
+  });
+  it("is false for files outside the root (including a same-prefix sibling)", () => {
+    expect(isFiledUnder("KNOBE samples/n.md", "KNOBE Portfolios")).toBe(false);
+    expect(isFiledUnder("KNOBE Portfolios Archive/n.md", "KNOBE Portfolios")).toBe(false);
+    expect(isFiledUnder("n.md", "KNOBE Portfolios")).toBe(false);
   });
 });
