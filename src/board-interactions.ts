@@ -13,6 +13,12 @@ const SIX_DIGIT_HEX = /^#[0-9a-f]{6}$/i;
 
 export type PortfolioColors = Record<string, string>;
 
+export function normalizePortfolioColor(candidate: unknown): string | null {
+  return typeof candidate === "string" && SIX_DIGIT_HEX.test(candidate)
+    ? candidate.toLowerCase()
+    : null;
+}
+
 export function portfolioColor(
   folderPath: string,
   index: number,
@@ -22,10 +28,7 @@ export function portfolioColor(
     ((index % DEFAULT_PORTFOLIO_COLORS.length) + DEFAULT_PORTFOLIO_COLORS.length)
       % DEFAULT_PORTFOLIO_COLORS.length
   ];
-  const candidate = saved[folderPath];
-  return typeof candidate === "string" && SIX_DIGIT_HEX.test(candidate)
-    ? candidate.toLowerCase()
-    : fallback;
+  return normalizePortfolioColor(saved[folderPath]) ?? fallback;
 }
 
 /** A drop onto the current direct parent is a no-op. Keeping this decision pure

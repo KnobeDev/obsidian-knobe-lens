@@ -1,4 +1,5 @@
 import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, Notice, debounce, setIcon } from "obsidian";
+import Sortable from "sortablejs";
 import type KnobeLensPlugin from "./main";
 import { scanVault, ScanRow, findUnindexedKnobeFiles } from "./scanner";
 import { Status, extractBodyText } from "./lens-core";
@@ -10,6 +11,7 @@ import { getVerdict } from "./trust";
 import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
 import { groupPortfolioRows, groupRecognitionRows } from "./board";
+import { shouldMovePortfolioCard } from "./board-interactions";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
 const BODY_PREVIEW_LINES = 10;
@@ -44,6 +46,7 @@ export class KnobeLensView extends ItemView {
   // clobbers the persistent vault tally and is never re-announced on a silent
   // background rescan.
   private actionStatusEl!: HTMLElement;
+  private portfolioSortables: Sortable[] = [];
 
   // Re-entrancy guard: a scan triggered while one is running coalesces into a
   // single trailing rescan instead of interleaving two passes over the vault.
@@ -311,9 +314,21 @@ export class KnobeLensView extends ItemView {
    * providing a keyboard/voice alternative to drag-and-drop folder movement. */
   private renderCard(list: HTMLElement, row: ScanRow, idSuffix: string, showState: boolean): void {
     const card = list.createEl("li", { cls: "knobe-lens-card" });
+    card.dataset.path = row.file.path;
     card.toggleClass("is-selected", row.file.path === this.selectedPath);
 
-    if (showState) this.stateBadge(card.createDiv({ cls: "knobe-lens-card-status" }), row.result.state);
+    if (showState) {
+      const status = card.createDiv({ cls: "knobe-lens-card-status" });
+      this.stateBadge(status, row.result.state);
+      const handle = status.createSpan({
+        cls: "knobe-lens-drag-handle",
+        attr: {
+          title: `Drag "${row.title}" to another portfolio`,
+          "aria-hidden": "true",
+        },
+      });
+      setIcon(handle, "grip-vertical");
+    }
 
     const trigger = card.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-card-title" });
     trigger.setAttr("aria-pressed", String(row.file.path === this.selectedPath));
@@ -340,30 +355,58 @@ export class KnobeLensView extends ItemView {
   /**
    * Per-row "Move to portfolio" control. A native <select> (free keyboard/AT
    * semantics, change = up-event for SC 2.5.2). Enabled only once the user has
-   * locally marked the object "trusted" — otherwise it is truly disabled with a
-   * visible, programmatically-associated reason (never colour alone, SC 1.4.1).
+   * locally marked the object "trusted" — otherwise it is truly disabled beside
+   * a prominent Trust to file button. The select remains visible and becomes the
+   * keyboard/voice alternative to drag-and-drop after trust is recorded.
    */
   private renderMoveControl(td: HTMLElement, row: ScanRow, idSuffix: string): void {
     const selId = `kl-move-${idSuffix}`;
     const helpId = `kl-move-help-${idSuffix}`;
 
-    // Hidden label carries the object title so each row's control is
-    // distinguishable and voice-addressable ("Move '<title>' to portfolio").
-    td.createEl("label", { cls: "knobe-lens-sr-only", text: `Move "${row.title}" to portfolio`, attr: { for: selId } });
-    const select = td.createEl("select", { cls: "knobe-lens-move", attr: { id: selId } });
+    td.createEl("label", {
+      cls: "knobe-lens-move-label",
+      text: "Move to portfolio",
+      attr: { for: selId },
+    });
+    const select = td.createEl("select", {
+      cls: "knobe-lens-move",
+      attr: {
+        id: selId,
+        "aria-label": `Move to portfolio: "${row.title}"`,
+      },
+    });
 
     const trusted = getVerdict(this.plugin.trust, row.payloadHash)?.verdict === "trusted";
     if (!trusted) {
+      const trustToFile = td.createEl("button", {
+        cls: "knobe-lens-action-button is-trust knobe-lens-trust-to-file",
+        text: "Trust to file",
+      });
+      if (!row.payloadHash) {
+        trustToFile.setAttr("disabled", "true");
+        trustToFile.setAttr("aria-describedby", helpId);
+      } else {
+        trustToFile.onclick = () => void (async () => {
+          await this.plugin.setVerdict(row.payloadHash as string, "trusted", "Trusted from filing control");
+          this.setActionStatus(`Trusted "${row.title}". Choose a portfolio to file it.`);
+          await this.refresh(false);
+          this.rowTriggers.get(row.file.path)?.focus();
+        })();
+      }
       select.createEl("option", { text: "Move to portfolio…", attr: { value: NO_FOLDER_VALUE } });
       select.setAttr("disabled", "true");
       select.setAttr("aria-describedby", helpId);
-      td.createEl("div", { cls: "knobe-lens-move-help", text: "Trust to file", attr: { id: helpId } });
+      td.createEl("div", {
+        cls: "knobe-lens-move-help",
+        text: row.payloadHash ? "Trust this object before filing it." : "Unreadable objects cannot be trusted.",
+        attr: { id: helpId },
+      });
       return;
     }
 
     const currentPath = row.file.parent?.path ?? "";
     const folders = this.plugin.portfolioFolders();
-    select.createEl("option", { text: `Move "${row.title}" to…`, attr: { value: NO_FOLDER_VALUE } });
+    select.createEl("option", { text: "Move to portfolio…", attr: { value: NO_FOLDER_VALUE } });
     for (const f of folders) {
       const opt = select.createEl("option", { text: f.name, attr: { value: f.path } });
       if (f.path === currentPath) opt.setAttr("selected", "true");
@@ -421,6 +464,7 @@ export class KnobeLensView extends ItemView {
   }
 
   private renderPortfolios(): void {
+    this.destroyPortfolioSortables();
     const c = this.portfoliosEl;
     c.empty();
     const folders = this.plugin.portfolioFolders();
@@ -434,6 +478,8 @@ export class KnobeLensView extends ItemView {
     const lanes = groupPortfolioRows(folders, this.rows);
     lanes.forEach((lane, laneIndex) => {
       const details = c.createEl("details", { cls: "knobe-lens-portfolio-lane", attr: { open: "" } });
+      const color = this.plugin.portfolioColor(lane.folder.path, laneIndex);
+      details.style.setProperty("--knobe-portfolio-color", color);
       const summary = details.createEl("summary", { cls: "knobe-lens-portfolio-heading" });
       summary.createSpan({ text: lane.folder.name });
       summary.createSpan({
@@ -441,13 +487,74 @@ export class KnobeLensView extends ItemView {
         text: String(lane.rows.length),
         attr: { "aria-label": `${lane.rows.length} object${lane.rows.length === 1 ? "" : "s"}` },
       });
+      const controls = details.createDiv({ cls: "knobe-lens-portfolio-controls" });
+      const colorId = `knobe-portfolio-color-${laneIndex}`;
+      controls.createEl("label", { text: "Background", attr: { for: colorId } });
+      const colorInput = controls.createEl("input", {
+        cls: "knobe-lens-color-input",
+        attr: {
+          id: colorId,
+          type: "color",
+          value: color,
+          "aria-label": `Background color for ${lane.folder.name} portfolio`,
+        },
+      });
+      colorInput.addEventListener("input", () => {
+        details.style.setProperty("--knobe-portfolio-color", colorInput.value);
+      });
+      colorInput.addEventListener("change", () => {
+        void this.plugin.setPortfolioColor(lane.folder.path, colorInput.value);
+      });
+
+      const list = details.createEl("ul", {
+        cls: "knobe-lens-card-list knobe-lens-portfolio-cards",
+        attr: { "aria-label": `${lane.folder.name} portfolio documents` },
+      });
+      list.dataset.folderPath = lane.folder.path;
       if (lane.rows.length === 0) {
         details.createEl("p", { cls: "knobe-lens-empty", text: "No KNOBEs filed here yet." });
-        return;
+      } else {
+        lane.rows.forEach((row, cardIndex) => this.renderCard(list, row, `p-${laneIndex}-${cardIndex}`, true));
       }
-      const list = details.createEl("ul", { cls: "knobe-lens-card-list knobe-lens-portfolio-cards" });
-      lane.rows.forEach((row, cardIndex) => this.renderCard(list, row, `p-${laneIndex}-${cardIndex}`, true));
+      this.portfolioSortables.push(Sortable.create(list, {
+        group: "knobe-portfolios",
+        sort: false,
+        draggable: ".knobe-lens-card",
+        handle: ".knobe-lens-drag-handle",
+        animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 150,
+        chosenClass: "is-drag-chosen",
+        ghostClass: "is-drag-ghost",
+        dragClass: "is-dragging",
+        onEnd: (event) => void this.finishPortfolioDrop(event.item, event.to),
+      }));
     });
+  }
+
+  private async finishPortfolioDrop(card: HTMLElement, destinationList: HTMLElement): Promise<void> {
+    const path = card.dataset.path;
+    const destination = destinationList.dataset.folderPath;
+    const row = path ? this.rows.find((candidate) => candidate.file.path === path) : undefined;
+    if (!row || !destination) {
+      this.renderPortfolios();
+      return;
+    }
+    if (!shouldMovePortfolioCard(row.file.parent?.path ?? "", destination)) {
+      this.renderPortfolios();
+      return;
+    }
+    try {
+      await this.plugin.moveToPortfolio(row.file, destination);
+      await this.afterMove(row, destination.split("/").pop() ?? destination);
+    } catch (e) {
+      new Notice(errorMessage(e));
+      this.setActionStatus(`Could not move "${row.title}".`);
+      this.renderPortfolios();
+    }
+  }
+
+  private destroyPortfolioSortables(): void {
+    for (const sortable of this.portfolioSortables) sortable.destroy();
+    this.portfolioSortables = [];
   }
 
   private stateBadge(parent: HTMLElement, state: Status): void {
@@ -494,10 +601,28 @@ export class KnobeLensView extends ItemView {
     d.empty();
 
     const head = d.createDiv({ cls: "knobe-lens-detail-head" });
-    const titleWrap = head.createDiv();
+    const titleWrap = head.createDiv({ cls: "knobe-lens-detail-title-wrap" });
     titleWrap.createEl("h4", { text: row.title, cls: "knobe-lens-detail-title" });
     titleWrap.createDiv({ text: `${row.file.path} · ${row.contentType}`, cls: "knobe-lens-path" });
-    this.stateBadge(head.createDiv(), row.result.state);
+    const headActions = head.createDiv({ cls: "knobe-lens-detail-head-actions" });
+    this.stateBadge(headActions.createDiv(), row.result.state);
+    const minimize = headActions.createEl("button", { text: "Minimize" });
+    minimize.setAttr("aria-expanded", "true");
+    minimize.onclick = () => {
+      const minimized = !d.hasClass("is-minimized");
+      d.toggleClass("is-minimized", minimized);
+      minimize.setText(minimized ? "Expand" : "Minimize");
+      minimize.setAttr("aria-expanded", String(!minimized));
+    };
+    const clear = headActions.createEl("button", { text: "Clear results" });
+    clear.onclick = () => {
+      const restoreFocus = this.rowTriggers.get(row.file.path);
+      this.selectedPath = null;
+      this.updateRowSelection();
+      d.empty();
+      this.setActionStatus(`Cleared verification details for "${row.title}".`);
+      restoreFocus?.focus();
+    };
 
     const p = row.result.payload ?? {};
     // 0.1 envelopes store the hash in integrity.sha256, not a payload_hash field.
@@ -604,17 +729,29 @@ export class KnobeLensView extends ItemView {
     noteInput.addClass("knobe-lens-note-input");
 
     const actions = box.createDiv({ cls: "knobe-lens-actions" });
-    const trustBtn = actions.createEl("button", { text: "Trust" });
+    const trustBtn = actions.createEl("button", {
+      cls: "knobe-lens-action-button is-trust",
+      text: "Trust",
+    });
     trustBtn.onclick = async () => { await this.plugin.setVerdict(hash, "trusted", noteInput.value); await this.refresh(); };
-    const rejectBtn = actions.createEl("button", { text: "Reject" });
+    const rejectBtn = actions.createEl("button", {
+      cls: "knobe-lens-action-button is-reject",
+      text: "Reject",
+    });
     rejectBtn.onclick = async () => { await this.plugin.setVerdict(hash, "rejected", noteInput.value); await this.refresh(); };
     if (verdict) {
-      const clearBtn = actions.createEl("button", { text: "Clear verdict" });
+      const clearBtn = actions.createEl("button", {
+        cls: "knobe-lens-action-button is-clear",
+        text: "Clear verdict",
+      });
       clearBtn.onclick = async () => { await this.plugin.clearVerdict(hash); await this.refresh(); };
     }
 
     if (row.result.state === "verified" && row.quarantine !== "trusted") {
-      const promote = actions.createEl("button", { text: "Promote to trusted (re-seal)" });
+      const promote = actions.createEl("button", {
+        cls: "knobe-lens-action-button is-promote",
+        text: "Promote to trusted (re-seal)",
+      });
       promote.setAttr("aria-label", "Promote to trusted (re-seal): records the prior version as a parent in the lineage");
       promote.onclick = async () => { await this.plugin.promote(row.file); await this.refresh(); };
     }
@@ -622,6 +759,7 @@ export class KnobeLensView extends ItemView {
 
   async onClose(): Promise<void> {
     this.mounted = false;
+    this.destroyPortfolioSortables();
   }
 }
 

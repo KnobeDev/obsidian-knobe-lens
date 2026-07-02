@@ -5,8 +5,13 @@
   "main": "main.js",
   "author": "Joshua Hori (https://github.com/jdhori)",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/jdhori/obsidian-knobe-lens.git" },
-  "bugs": { "url": "https://github.com/jdhori/obsidian-knobe-lens/issues" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jdhori/obsidian-knobe-lens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jdhori/obsidian-knobe-lens/issues"
+  },
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
@@ -15,10 +20,14 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/sortablejs": "^1.15.9",
     "builtin-modules": "^4.0.0",
     "esbuild": "^0.25.12",
     "obsidian": "^1.7.2",
     "typescript": "^5.6.3",
     "vitest": "^3.2.6"
+  },
+  "dependencies": {
+    "sortablejs": "^1.15.7"
   }
 }

@@ -7,6 +7,11 @@ import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./sett
 import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./trust";
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
 import { scanVault } from "./scanner";
+import {
+  normalizePortfolioColor,
+  portfolioColor,
+  PortfolioColors,
+} from "./board-interactions";
 
 const RESEAL_DEBOUNCE_MS = 900;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -25,12 +30,14 @@ interface PluginData {
   settings: KnobeLensSettings;
   trust: TrustLedger;
   snapshots: Record<string, Snapshot>;
+  portfolioColors: PortfolioColors;
 }
 
 export default class KnobeLensPlugin extends Plugin {
   settings: KnobeLensSettings = DEFAULT_SETTINGS;
   trust: TrustLedger = {};
   private snapshots: Record<string, Snapshot> = {};
+  private portfolioColors: PortfolioColors = {};
   private resealTimers = new Map<string, number>();
   private statusBar: HTMLElement | null = null;
 
@@ -318,6 +325,17 @@ export default class KnobeLensPlugin extends Plugin {
     return listPortfolioFolders(this.portfolioRootFolder());
   }
 
+  portfolioColor(folderPath: string, index: number): string {
+    return portfolioColor(folderPath, index, this.portfolioColors);
+  }
+
+  async setPortfolioColor(folderPath: string, color: string): Promise<void> {
+    const safe = normalizePortfolioColor(color);
+    if (!safe) return;
+    this.portfolioColors = { ...this.portfolioColors, [folderPath]: safe };
+    await this.persist();
+  }
+
   /** Create a portfolio folder under the root (lazily creating the root) and
    *  return its vault path. Returns the path string rather than re-fetching the
    *  TFolder from the index — that re-fetch can race the index registration and
@@ -441,10 +459,20 @@ export default class KnobeLensPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, migrated);
     this.trust = data.trust ?? {};
     this.snapshots = data.snapshots ?? {};
+    this.portfolioColors = data.portfolioColors
+      && typeof data.portfolioColors === "object"
+      && !Array.isArray(data.portfolioColors)
+      ? data.portfolioColors
+      : {};
   }
 
   async persist(): Promise<void> {
-    const data: PluginData = { settings: this.settings, trust: this.trust, snapshots: this.snapshots };
+    const data: PluginData = {
+      settings: this.settings,
+      trust: this.trust,
+      snapshots: this.snapshots,
+      portfolioColors: this.portfolioColors,
+    };
     await this.saveData(data);
   }
 
