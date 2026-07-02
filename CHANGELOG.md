@@ -4,6 +4,28 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-02
+
+### Added
+
+- **Board view.** Recognition and portfolios are now presented as columns.
+  Recognition columns (Verified / Body modified / Failed / Unreadable) group
+  objects by verification outcome and are **read-only** — those states are derived
+  cryptographic results, not something you set. Portfolio columns are your subject
+  folders.
+- **Drag-and-drop filing.** Drag an object between portfolio columns to move it
+  between subject folders (powered by SortableJS, **bundled** — no extra plugin).
+  Dragging is portfolio-only; you can't drag into a recognition column, since
+  verification status is computed, not assigned.
+- **Risk-aware filing.** Filing warns before you trust a **body-modified** or
+  **failed** object, so a broken seal isn't quietly filed as trusted. Clean,
+  verified objects file without friction.
+
+### Changed
+
+- Portfolio and verification interactions polished (wrapped long titles, warmer
+  canvas, clearer states). README documents the bundled SortableJS runtime.
+
 ## [0.5.0] - 2026-06-30
 
 ### Added
@@ -144,6 +166,7 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.6.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.6.0
 [0.5.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.5.0
 [0.4.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.4.0
 [0.3.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.3.0
