@@ -13,6 +13,13 @@ A KNOBE is **any Markdown note carrying a seal block** (`-----BEGIN KNOBE B64---
 
 ## Install
 
+### Requirements
+
+- Obsidian 1.4.0 or newer with Community plugins enabled.
+- **No additional Obsidian plugins are required at runtime.**
+- SortableJS, which powers portfolio drag-and-drop, is bundled inside KNOBE Lens.
+- BRAT is optional: it is only a convenient way to install and update beta releases.
+
 ### Via BRAT (recommended)
 
 1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin.
@@ -41,7 +48,8 @@ cd obsidian-knobe-lens && npm install && npm run build
 |---|---|
 | Verify | Faithful port of the reference `lens.py`, gated against the 9 published conformance vectors. Reports `verified` / `verified-body-modified` / `failed` / `unreadable` and a conformance level. |
 | Seal | Appends a hash-sealed payload built from frontmatter + settings defaults. Idempotent, so "re-seal on save" never loops. |
-| Trust verdicts | Record a **local** trusted/rejected decision per object, keyed by payload hash. Never written to the file; auto-stale if the file changes. |
+| Trust verdicts | Record a **local** trusted/rejected decision per object, keyed by payload hash. Risk-aware filing warns before trusting body-modified or failed objects. Never written to the file; auto-stale if the file changes. |
+| Portfolios | File trusted objects into colored portfolio folders, move them by accessible folder selector, or drag them between folders. SortableJS is bundled—no extra plugin is needed. |
 | Break inspector | Classifies a broken seal as benign Unicode normalization vs. a real edit; shows a diff against the last-verified snapshot; offers restore / re-seal. |
 | Lineage | Graphs `parents[]` links between sources and their adaptations, with an accessible text fallback. |
 
@@ -55,7 +63,7 @@ cd obsidian-knobe-lens && npm install && npm run build
 
 ```bash
 npm install
-npm test        # vitest: 28 tests (verifier vectors, sealer round-trip/idempotency, trust, diagnosis, diff, lineage, security)
+npm test        # vitest: 73 tests (verifier vectors, sealer, trust, boards, diagnosis, diff, lineage, security)
 npm run dev     # esbuild watch
 npm run build   # tsc type-check + production bundle -> main.js
 ```

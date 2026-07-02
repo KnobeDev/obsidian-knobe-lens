@@ -21,6 +21,12 @@
   justify-content: space-between;
   gap: 12px;
 }
+.knobe-lens-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .knobe-lens-note {
   font-size: 12px;
   color: var(--text-muted);
@@ -354,6 +360,20 @@ h5.knobe-lens-section {
   color: var(--text-on-accent);
   font-weight: var(--font-medium);
 }
+.knobe-lens-primary-action {
+  min-height: 32px;
+  border: 1px solid var(--color-blue);
+  background-color: var(--color-blue);
+  color: var(--text-on-accent);
+  font-weight: var(--font-medium);
+}
+.knobe-lens-primary-action:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+.knobe-lens-primary-action:focus-visible {
+  outline: 2px solid var(--text-normal);
+  outline-offset: 2px;
+}
 .knobe-lens-action-button.is-trust {
   background-color: var(--color-green);
   border-color: var(--color-green);
@@ -455,6 +475,15 @@ h5.knobe-lens-section {
 .knobe-lens-trust-to-file {
   width: 100%;
   margin-bottom: 8px;
+}
+.knobe-lens-trust-warning {
+  padding: 10px 12px;
+  border: 1px solid var(--color-orange);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  line-height: 1.5;
 }
 
 /* Portfolio folder lanes use native details/summary disclosures. */
@@ -593,6 +622,13 @@ h5.knobe-lens-section {
 }
 
 @media (max-width: 600px) {
+  .knobe-lens-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .knobe-lens-header-actions {
+    justify-content: flex-start;
+  }
   .knobe-lens-detail-head {
     flex-direction: column;
   }
@@ -608,6 +644,7 @@ h5.knobe-lens-section {
 }
 
 @media (forced-colors: active) {
+  .knobe-lens-primary-action:hover:not(:disabled),
   .knobe-lens-action-button:hover:not(:disabled) {
     filter: none;
   }

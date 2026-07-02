@@ -11,7 +11,12 @@ import { getVerdict } from "./trust";
 import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
 import { groupPortfolioRows, groupRecognitionRows } from "./board";
-import { shouldMovePortfolioCard } from "./board-interactions";
+import {
+  shouldMovePortfolioCard,
+  trustToFilePolicy,
+  TrustToFilePolicy,
+} from "./board-interactions";
+import { TrustConfirmModal } from "./trust-confirm-modal";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
 const BODY_PREVIEW_LINES = 10;
@@ -84,12 +89,19 @@ export class KnobeLensView extends ItemView {
 
     const header = root.createDiv({ cls: "knobe-lens-header" });
     header.createEl("h3", { text: "KNOBE Lens" });
-    const refresh = header.createEl("button", { text: "Rescan" });
+    const headerActions = header.createDiv({ cls: "knobe-lens-header-actions" });
+    const refresh = headerActions.createEl("button", {
+      cls: "knobe-lens-primary-action",
+      text: "Rescan",
+    });
     refresh.setAttr("aria-label", "Rescan the vault for KNOBE documents and re-verify all of them");
     refresh.onclick = () => void this.refresh(true, true); // explicit Rescan = deep disk reconcile
 
-    const report = header.createEl("button", { text: "Verify a document…" });
-    report.setAttr("aria-label", "Submit a document for verification and create a report");
+    const report = headerActions.createEl("button", {
+      cls: "knobe-lens-primary-action",
+      text: "Verify a document…",
+    });
+    report.setAttr("aria-label", "Verify a document and create a report");
     report.onclick = () => void this.plugin.verifyAndReport();
 
     root.createEl("p", {
@@ -378,20 +390,16 @@ export class KnobeLensView extends ItemView {
 
     const trusted = getVerdict(this.plugin.trust, row.payloadHash)?.verdict === "trusted";
     if (!trusted) {
+      const policy = trustToFilePolicy(row.result.state);
       const trustToFile = td.createEl("button", {
-        cls: "knobe-lens-action-button is-trust knobe-lens-trust-to-file",
+        cls: `knobe-lens-action-button is-${policy.tone} knobe-lens-trust-to-file`,
         text: "Trust to file",
       });
       if (!row.payloadHash) {
         trustToFile.setAttr("disabled", "true");
         trustToFile.setAttr("aria-describedby", helpId);
       } else {
-        trustToFile.onclick = () => void (async () => {
-          await this.plugin.setVerdict(row.payloadHash as string, "trusted", "Trusted from filing control");
-          this.setActionStatus(`Trusted "${row.title}". Choose a portfolio to file it.`);
-          await this.refresh(false);
-          this.rowTriggers.get(row.file.path)?.focus();
-        })();
+        trustToFile.onclick = () => this.requestTrustToFile(row, policy);
       }
       select.createEl("option", { text: "Move to portfolio…", attr: { value: NO_FOLDER_VALUE } });
       select.setAttr("disabled", "true");
@@ -446,6 +454,27 @@ export class KnobeLensView extends ItemView {
         }
       })();
     });
+  }
+
+  private requestTrustToFile(row: ScanRow, policy: TrustToFilePolicy): void {
+    const applyTrust = async (): Promise<void> => {
+      if (!row.payloadHash) return;
+      await this.plugin.setVerdict(row.payloadHash, "trusted", "Trusted from filing control");
+      this.setActionStatus(`Trusted "${row.title}". Choose a portfolio to file it.`);
+      await this.refresh(false);
+      this.rowTriggers.get(row.file.path)?.focus();
+    };
+
+    if (!policy.warning) {
+      void applyTrust();
+      return;
+    }
+    new TrustConfirmModal(this.app, {
+      message: policy.warning,
+      tone: policy.tone === "reject" ? "reject" : "promote",
+      onReview: () => void this.select(row),
+      onConfirm: applyTrust,
+    }).open();
   }
 
   /** After a successful move: announce, rescan, and restore focus to the moved
