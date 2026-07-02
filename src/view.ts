@@ -119,7 +119,12 @@ export class KnobeLensView extends ItemView {
     root.createEl("h4", { text: "Recognition" });
     this.recognitionEl = root.createDiv({
       cls: "knobe-lens-kanban-board",
-      attr: { "aria-label": "KNOBE objects grouped by recognition result" },
+      attr: {
+        role: "group",
+        // Recognition status is a derived cryptographic result, so these columns
+        // are read-only; filing happens through each card's Move control.
+        "aria-label": "KNOBE objects grouped by recognition result. Read-only — use each card's Move to portfolio control to file it.",
+      },
     });
 
     this.detailEl = root.createDiv({ cls: "knobe-lens-detail", attr: { role: "region", tabindex: "-1", "aria-label": "Object detail" } });

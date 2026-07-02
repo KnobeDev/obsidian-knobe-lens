@@ -8,6 +8,11 @@
   --text-muted: #5d5547;
   --text-faint: #6d6455;
   --text-accent: #5a4b22;
+  /* Status colors darkened for >=4.5:1 text contrast on the forced-light warm
+     canvas (the theme defaults are tuned for its own background, not this one). */
+  --color-green: #15711b;
+  --color-yellow: #8a6d00;
+  --color-red: #b3261e;
   min-height: 100%;
   box-sizing: border-box;
   padding: 8px 10px 18px;
