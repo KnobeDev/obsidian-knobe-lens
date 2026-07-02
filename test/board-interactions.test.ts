@@ -3,6 +3,7 @@ import {
   DEFAULT_PORTFOLIO_COLORS,
   portfolioColor,
   shouldMovePortfolioCard,
+  trustToFilePolicy,
 } from "../src/board-interactions";
 
 describe("portfolioColor", () => {
@@ -39,5 +40,28 @@ describe("shouldMovePortfolioCard", () => {
       "KNOBE Portfolios/Research",
       "KNOBE Portfolios/Research",
     )).toBe(false);
+  });
+});
+
+describe("trustToFilePolicy", () => {
+  it("uses normal trust styling without a warning for verified objects", () => {
+    expect(trustToFilePolicy("verified")).toEqual({
+      tone: "trust",
+      warning: null,
+    });
+  });
+
+  it("uses orange styling and asks for payload confirmation when the body changed", () => {
+    const policy = trustToFilePolicy("verified-body-modified");
+    expect(policy.tone).toBe("promote");
+    expect(policy.warning).toContain("checked the payload");
+    expect(policy.warning).toContain("body has changed");
+  });
+
+  it("uses red styling and asks for payload confirmation when verification failed", () => {
+    const policy = trustToFilePolicy("failed");
+    expect(policy.tone).toBe("reject");
+    expect(policy.warning).toContain("checked the payload");
+    expect(policy.warning).toContain("verification failed");
   });
 });
