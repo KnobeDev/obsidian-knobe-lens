@@ -1,3 +1,5 @@
+import type { Status } from "./lens-core";
+
 /** Distinct, moderately saturated defaults; lane CSS blends these with the
  * active Obsidian theme so headings retain contrast in light and dark modes. */
 export const DEFAULT_PORTFOLIO_COLORS = [
@@ -38,4 +40,25 @@ export function shouldMovePortfolioCard(
   destinationFolderPath: string,
 ): boolean {
   return currentFolderPath !== destinationFolderPath;
+}
+
+export interface TrustToFilePolicy {
+  tone: "trust" | "promote" | "reject";
+  warning: string | null;
+}
+
+export function trustToFilePolicy(state: Status): TrustToFilePolicy {
+  if (state === "verified-body-modified") {
+    return {
+      tone: "promote",
+      warning: "Have you checked the payload yet? The sealed payload is intact, but the document body has changed. Review the decoded payload and body differences before trusting this file.",
+    };
+  }
+  if (state === "failed") {
+    return {
+      tone: "reject",
+      warning: "Have you checked the payload yet? The verification failed, so the sealed payload may have changed or may not be trustworthy. Review the decoded payload before trusting this file.",
+    };
+  }
+  return { tone: "trust", warning: null };
 }
