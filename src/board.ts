@@ -62,4 +62,3 @@ export function groupPortfolioRows<T extends PortfolioRow>(
     };
   });
 }
-
