@@ -9,6 +9,7 @@ import { renderLineage } from "./lineage-render";
 import { getVerdict } from "./trust";
 import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
+import { groupPortfolioRows, groupRecognitionRows } from "./board";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
 const BODY_PREVIEW_LINES = 10;
@@ -30,7 +31,7 @@ export class KnobeLensView extends ItemView {
   private rows: ScanRow[] = [];
   private selectedPath: string | null = null;
   private rowTriggers = new Map<string, HTMLElement>();
-  private tableBody!: HTMLElement;
+  private recognitionEl!: HTMLElement;
   private detailEl!: HTMLElement;
   private lineageEl!: HTMLElement;
   private portfoliosEl!: HTMLElement;
@@ -100,13 +101,11 @@ export class KnobeLensView extends ItemView {
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
     });
 
-    const table = root.createEl("table", { cls: "knobe-lens-table" });
-    table.createEl("caption", { text: "KNOBE objects in this vault", cls: "knobe-lens-sr-only" });
-    const headRow = table.createEl("thead").createEl("tr");
-    for (const h of ["Object", "Status", "Conformance", "Declared", "Your verdict", "Portfolio"]) {
-      headRow.createEl("th", { text: h, attr: { scope: "col" } });
-    }
-    this.tableBody = table.createEl("tbody");
+    root.createEl("h4", { text: "Recognition" });
+    this.recognitionEl = root.createDiv({
+      cls: "knobe-lens-kanban-board",
+      attr: { "aria-label": "KNOBE objects grouped by recognition result" },
+    });
 
     this.detailEl = root.createDiv({ cls: "knobe-lens-detail", attr: { role: "region", tabindex: "-1", "aria-label": "Object detail" } });
 
@@ -202,7 +201,7 @@ export class KnobeLensView extends ItemView {
     if (dirty) await this.plugin.persist();
 
     this.renderSummary();
-    this.renderTable();
+    this.renderRecognitionBoard();
     this.renderLineage();
     this.renderPortfolios();
 
@@ -280,43 +279,62 @@ export class KnobeLensView extends ItemView {
     );
   }
 
-  private renderTable(): void {
-    this.tableBody.empty();
+  private renderRecognitionBoard(): void {
+    this.recognitionEl.empty();
     this.rowTriggers.clear();
-    const rows = this.rows.filter((r) => !this.isFiled(r)); // filed objects live in the Portfolios section
-    if (rows.length === 0) {
-      const tr = this.tableBody.createEl("tr");
-      tr.createEl("td", {
-        attr: { colspan: "6" },
-        cls: "knobe-lens-muted",
-        text: this.rows.length ? "All KNOBEs are filed in portfolios (below)." : "No KNOBEs yet.",
+    const columns = groupRecognitionRows(this.rows, (row) => this.isFiled(row));
+    columns.forEach((column) => {
+      const headingId = `knobe-recognition-${column.state}`;
+      const section = this.recognitionEl.createEl("section", {
+        cls: `knobe-lens-kanban-column state-border-${column.state}`,
+        attr: { "aria-labelledby": headingId },
       });
-      return;
-    }
-    rows.forEach((row, index) => {
-      const tr = this.tableBody.createEl("tr", { cls: "knobe-lens-row" });
+      const heading = section.createDiv({ cls: "knobe-lens-kanban-heading" });
+      const title = heading.createEl("h5", { attr: { id: headingId } });
+      this.stateBadge(title, column.state);
+      heading.createSpan({
+        cls: "knobe-lens-count",
+        text: String(column.rows.length),
+        attr: { "aria-label": `${column.rows.length} object${column.rows.length === 1 ? "" : "s"}` },
+      });
 
-      // First cell carries a real button so native keyboard semantics apply and
-      // the table's row/cell structure stays intact for screen readers.
-      const objTd = tr.createEl("td");
-      const trigger = objTd.createEl("button", { cls: "knobe-lens-row-trigger" });
-      trigger.setAttr("aria-pressed", String(row.file.path === this.selectedPath));
-      trigger.createDiv({ text: row.title, cls: "knobe-lens-title" });
-      trigger.createDiv({ text: row.file.path, cls: "knobe-lens-path" });
-      trigger.onclick = () => void this.select(row);
-      this.rowTriggers.set(row.file.path, trigger);
-
-      const statusTd = tr.createEl("td");
-      this.stateBadge(statusTd, row.result.state);
-      tr.createEl("td", { text: row.result.conformance });
-      tr.createEl("td", { text: row.quarantine });
-      const verdict = getVerdict(this.plugin.trust, row.payloadHash);
-      tr.createEl("td", { text: verdict ? `you: ${verdict.verdict}` : "—" });
-
-      this.renderMoveControl(tr.createEl("td"), row, `t${index}`);
-
-      tr.toggleClass("is-selected", row.file.path === this.selectedPath);
+      if (column.rows.length === 0) {
+        section.createEl("p", { cls: "knobe-lens-empty", text: "No objects" });
+        return;
+      }
+      const list = section.createEl("ul", { cls: "knobe-lens-card-list" });
+      column.rows.forEach((row, index) => this.renderCard(list, row, `r-${column.state}-${index}`, false));
     });
+  }
+
+  /** Render one kanban card. The final row always contains the folder control,
+   * providing a keyboard/voice alternative to drag-and-drop folder movement. */
+  private renderCard(list: HTMLElement, row: ScanRow, idSuffix: string, showState: boolean): void {
+    const card = list.createEl("li", { cls: "knobe-lens-card" });
+    card.toggleClass("is-selected", row.file.path === this.selectedPath);
+
+    if (showState) this.stateBadge(card.createDiv({ cls: "knobe-lens-card-status" }), row.result.state);
+
+    const trigger = card.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-card-title" });
+    trigger.setAttr("aria-pressed", String(row.file.path === this.selectedPath));
+    trigger.createSpan({ text: row.title, cls: "knobe-lens-title" });
+    trigger.onclick = () => void this.select(row);
+    this.rowTriggers.set(row.file.path, trigger);
+
+    card.createDiv({ text: row.file.path, cls: "knobe-lens-path" });
+    const facts = card.createEl("dl", { cls: "knobe-lens-card-facts" });
+    this.cardFact(facts, "Conformance", row.result.conformance);
+    this.cardFact(facts, "Declared", row.quarantine);
+    const verdict = getVerdict(this.plugin.trust, row.payloadHash);
+    this.cardFact(facts, "Your verdict", verdict?.verdict ?? "Unreviewed");
+
+    const footer = card.createDiv({ cls: "knobe-lens-card-footer" });
+    this.renderMoveControl(footer, row, idSuffix);
+  }
+
+  private cardFact(parent: HTMLElement, label: string, value: string): void {
+    parent.createEl("dt", { text: label });
+    parent.createEl("dd", { text: value });
   }
 
   /**
@@ -413,23 +431,22 @@ export class KnobeLensView extends ItemView {
       });
       return;
     }
-    const list = c.createEl("ul", { cls: "knobe-lens-portfolio-list" });
-    folders.forEach((folder, fi) => {
-      const li = list.createEl("li", { cls: "knobe-lens-portfolio" });
-      const members = this.rows.filter((r) => r.file.parent?.path === folder.path);
-      li.createEl("h5", { text: `${folder.name} (${members.length})`, cls: "knobe-lens-section" });
-      if (members.length === 0) {
-        li.createEl("p", { cls: "knobe-lens-muted", text: "No KNOBEs filed here yet." });
+    const lanes = groupPortfolioRows(folders, this.rows);
+    lanes.forEach((lane, laneIndex) => {
+      const details = c.createEl("details", { cls: "knobe-lens-portfolio-lane", attr: { open: "" } });
+      const summary = details.createEl("summary", { cls: "knobe-lens-portfolio-heading" });
+      summary.createSpan({ text: lane.folder.name });
+      summary.createSpan({
+        cls: "knobe-lens-count",
+        text: String(lane.rows.length),
+        attr: { "aria-label": `${lane.rows.length} object${lane.rows.length === 1 ? "" : "s"}` },
+      });
+      if (lane.rows.length === 0) {
+        details.createEl("p", { cls: "knobe-lens-empty", text: "No KNOBEs filed here yet." });
         return;
       }
-      const inner = li.createEl("ul", { cls: "knobe-lens-portfolio-members" });
-      members.forEach((r, mi) => {
-        const mli = inner.createEl("li", { cls: "knobe-lens-portfolio-member" });
-        this.stateBadge(mli.createSpan({ cls: "knobe-lens-member-badge" }), r.result.state);
-        const trigger = mli.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-member-title", text: r.title });
-        trigger.onclick = () => void this.select(r);
-        this.renderMoveControl(mli.createDiv({ cls: "knobe-lens-member-move" }), r, `p${fi}-${mi}`);
-      });
+      const list = details.createEl("ul", { cls: "knobe-lens-card-list knobe-lens-portfolio-cards" });
+      lane.rows.forEach((row, cardIndex) => this.renderCard(list, row, `p-${laneIndex}-${cardIndex}`, true));
     });
   }
 
@@ -460,7 +477,7 @@ export class KnobeLensView extends ItemView {
     for (const [path, trigger] of this.rowTriggers) {
       const isSel = path === this.selectedPath;
       trigger.setAttr("aria-pressed", String(isSel));
-      (trigger.closest("tr") as HTMLElement | null)?.toggleClass("is-selected", isSel);
+      (trigger.closest(".knobe-lens-card") as HTMLElement | null)?.toggleClass("is-selected", isSel);
     }
   }
 
