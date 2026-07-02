@@ -4,6 +4,19 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-07-02
+
+### Fixed
+
+- **Accessibility (from a WCAG 2.1 AA review of the board).**
+  - The "Body modified" status badge (and the green/red status colors) now meet
+    the 4.5:1 text-contrast minimum on the light "warm canvas" board — the theme
+    defaults were tuned for a different background.
+  - The Recognition board now identifies itself to assistive tech as **read-only**
+    (`role="group"` with an explanatory label), so screen-reader users know those
+    columns are derived verification results and aren't drop targets — filing is
+    done with each card's *Move to portfolio* control.
+
 ## [0.6.0] - 2026-07-02
 
 ### Added
@@ -166,6 +179,7 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.6.1]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.6.1
 [0.6.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.6.0
 [0.5.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.5.0
 [0.4.0]: https://github.com/jdhori/obsidian-knobe-lens/releases/tag/0.4.0
