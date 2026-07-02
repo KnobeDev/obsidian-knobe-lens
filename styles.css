@@ -1,5 +1,19 @@
 .knobe-lens {
-  padding: 0 6px;
+  --background-primary: #fffdf7;
+  --background-primary-alt: #fbf4e3;
+  --background-secondary: #eee3c7;
+  --background-modifier-border: #c8b98f;
+  --background-modifier-border-hover: #aa986b;
+  --text-normal: #2f2a20;
+  --text-muted: #5d5547;
+  --text-faint: #6d6455;
+  --text-accent: #5a4b22;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px 18px;
+  background: #f6eed8;
+  color: var(--text-normal);
+  color-scheme: light;
 }
 .knobe-lens-header {
   display: flex;
@@ -100,12 +114,23 @@
   box-shadow: inset 3px 0 0 var(--interactive-accent);
 }
 .knobe-lens-card-title {
+  display: block;
+  block-size: auto;
   min-width: 0;
   max-width: 100%;
-  margin-bottom: 4px;
+  min-height: 2.8em;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 2px 0 9px;
+  line-height: 1.4;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.knobe-lens-card-title + .knobe-lens-path {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 .knobe-lens-card-status {
   display: flex;
@@ -146,6 +171,7 @@
   min-width: 0;
   max-width: 100%;
   font-weight: var(--font-medium);
+  line-height: inherit;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -215,7 +241,9 @@
   max-width: 100%;
   font-size: 15px;
   font-weight: var(--font-medium);
-  margin: 0;
+  margin: 0 0 5px;
+  padding-bottom: 3px;
+  line-height: 1.4;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
