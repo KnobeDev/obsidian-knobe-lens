@@ -3,6 +3,8 @@ import Sortable from "sortablejs";
 import type KnobeLensPlugin from "./main";
 import { scanVault, ScanRow, findUnindexedKnobeFiles } from "./scanner";
 import { Status, extractBodyText } from "./lens-core";
+import { savedState } from "./saved-state";
+import type { ResealComment } from "./seal";
 import { diagnoseBreak } from "./diagnose";
 import { lineDiff } from "./diff";
 import { buildLineage } from "./lineage";
@@ -345,6 +347,12 @@ export class KnobeLensView extends ItemView {
         },
       });
       setIcon(handle, "grip-vertical");
+
+      // Filed objects carry a saved/verified indicator: a checkmark when the seal
+      // is intact, or an orange "Reverify?" prompt when the body changed since sealing.
+      const saved = savedState(true, row.result.state, row.result.conformance);
+      if (saved === "needs-reverify") this.reverifyControl(card, row);
+      else if (saved === "saved-verified") this.savedVerifiedBadge(card);
     }
 
     const trigger = card.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-card-title" });
@@ -597,6 +605,34 @@ export class KnobeLensView extends ItemView {
     badge.createSpan({ text: STATE_LABEL[state] });
   }
 
+  /** Checkmark shown on a filed card whose seal is intact. role="img" + a single
+   *  aria-label so AT announces it atomically; never colour-only (icon + text). */
+  private savedVerifiedBadge(parent: HTMLElement): void {
+    const badge = parent.createSpan({
+      cls: "knobe-lens-saved-badge",
+      attr: { role: "img", "aria-label": "Saved and verified" },
+    });
+    setIcon(badge.createSpan({ cls: "knobe-lens-badge-icon" }), "badge-check");
+    badge.createSpan({ text: "Saved & verified" });
+  }
+
+  /** Orange prompt shown on a filed card whose body was edited since sealing.
+   *  Clicking opens the detail pane, where the change diff + reseal-with-comment
+   *  flow lives. The visible hint keeps the meaning off colour alone (SC 1.4.1). */
+  private reverifyControl(parent: HTMLElement, row: ScanRow): void {
+    const wrap = parent.createDiv({ cls: "knobe-lens-reverify" });
+    const btn = wrap.createEl("button", {
+      cls: "knobe-lens-action-button is-reverify",
+      text: "Reverify?",
+    });
+    btn.setAttr("aria-label", `Reverify "${row.title}" — it changed since it was sealed`);
+    btn.onclick = () => void this.select(row);
+    wrap.createSpan({
+      cls: "knobe-lens-reverify-hint",
+      text: "Edited since last seal — review the changes and reseal.",
+    });
+  }
+
   private renderLineage(): void {
     const graph = buildLineage(
       this.rows.map((r) => ({
@@ -690,8 +726,129 @@ export class KnobeLensView extends ItemView {
       bodyWrap.createEl("pre", { cls: "knobe-lens-pre knobe-lens-body", text: preview });
     }
 
-    if (row.result.state !== "verified") await this.renderBreakInspector(d, row);
+    const filed = this.isFiled(row);
+    const filedBodyModified = filed && row.result.state === "verified-body-modified";
+    if (filed) this.renderReverifySection(d, row);
+    // The Break inspector still handles genuinely broken seals and every unfiled
+    // object; for a filed body-modified object the reverify section above already
+    // shows the change diff + reseal, so don't render the inspector's duplicate diff.
+    if (row.result.state !== "verified" && !filedBodyModified) await this.renderBreakInspector(d, row);
     this.renderTrustControls(d, row);
+  }
+
+  /** Detail-pane block for a filed (portfolio) object: a "saved & verified"
+   *  confirmation when the seal is intact, or the reverify flow (change diff +
+   *  comment + reseal) when the body was edited. Always shows the seal history. */
+  private renderReverifySection(parent: HTMLElement, row: ScanRow): void {
+    const saved = savedState(true, row.result.state, row.result.conformance);
+    const box = parent.createDiv({ cls: "knobe-lens-seal" });
+
+    if (saved === "saved-verified") {
+      box.createEl("h5", { text: "Saved & verified", cls: "knobe-lens-section" });
+      const ok = box.createDiv({ cls: "knobe-lens-saved-badge", attr: { role: "img", "aria-label": "Saved and verified" } });
+      setIcon(ok.createSpan({ cls: "knobe-lens-badge-icon" }), "badge-check");
+      ok.createSpan({ text: "Filed in a portfolio and the seal is intact." });
+      this.renderCommentLog(box, row);
+      return;
+    }
+
+    if (saved === "needs-reverify") {
+      box.createEl("h5", { text: "Reverify", cls: "knobe-lens-section" });
+      box.createEl("div", {
+        cls: "knobe-lens-muted",
+        text: "This filed object was edited after it was sealed. Review the changes, add a note about what changed, and reseal to reverify it.",
+      });
+      this.renderSealChanges(box, row);
+      this.renderResealForm(box, row);
+      this.renderCommentLog(box, row);
+      return;
+    }
+
+    // Filed but the seal is broken — the Break inspector diagnoses it; show history only.
+    this.renderCommentLog(box, row);
+  }
+
+  /** The body changes since the last verified seal, red + underlined (added) and
+   *  red + struck-through (removed). Off-screen "Added:"/"Removed:" prefixes keep
+   *  the meaning off colour/decoration alone (SC 1.4.1). */
+  private renderSealChanges(parent: HTMLElement, row: ScanRow): void {
+    const wrap = parent.createDiv({ cls: "knobe-lens-seal-changes" });
+    wrap.createEl("div", { cls: "knobe-lens-muted", text: "Changes since the last verified seal:" });
+    const snap = this.plugin.snapshotFor(row.file.path);
+    if (!snap) {
+      wrap.createSpan({ cls: "knobe-lens-muted", text: "No last-verified snapshot available — cannot show a diff." });
+      return;
+    }
+    const cur = extractBodyText(row.raw) ?? "";
+    const old = extractBodyText(snap.content) ?? "";
+    const ops = lineDiff(old, cur).filter((op) => op.type !== "same");
+    if (ops.length === 0) {
+      wrap.createSpan({ cls: "knobe-lens-muted", text: "No line-level differences in the body." });
+      return;
+    }
+    const pre = wrap.createEl("pre", {
+      cls: "knobe-lens-pre knobe-lens-seal-diff",
+      attr: { role: "group", "aria-label": `${ops.length} changed line(s) since the last verified seal` },
+    });
+    for (const op of ops) {
+      const line = pre.createDiv({ cls: op.type === "add" ? "seal-add" : "seal-del" });
+      line.createSpan({ cls: "knobe-lens-sr-only", text: op.type === "add" ? "Added: " : "Removed: " });
+      line.createSpan({ text: op.line });
+    }
+  }
+
+  /** Comment field + "Reverify & reseal" for an edited filed object. Enter is left
+   *  free for newlines (a textarea) — submit is via the button only. */
+  private renderResealForm(parent: HTMLElement, row: ScanRow): void {
+    const box = parent.createDiv({ cls: "knobe-lens-reseal-form" });
+    const commentId = `kl-seal-comment-${(row.payloadHash ?? row.file.path).slice(0, 8)}`;
+    box.createEl("label", {
+      text: "Comment about these changes (optional)",
+      cls: "knobe-lens-muted",
+      attr: { for: commentId },
+    });
+    const comment = box.createEl("textarea", {
+      cls: "knobe-lens-seal-comment",
+      attr: { id: commentId, rows: "2", placeholder: "e.g. fixed the citation in §2, reworded the summary" },
+    });
+
+    const actions = box.createDiv({ cls: "knobe-lens-actions" });
+    const reseal = actions.createEl("button", { cls: "knobe-lens-action-button is-reverify", text: "Reverify & reseal" });
+    reseal.onclick = async () => {
+      await this.plugin.resealWithComment(row.file, comment.value);
+      this.setActionStatus(`Reverified "${row.title}".`);
+      this.scheduleRefresh.cancel();
+      await this.refresh(false);
+    };
+    if (this.plugin.snapshotFor(row.file.path)) {
+      const restore = actions.createEl("button", { text: "Restore last-verified" });
+      restore.onclick = async () => {
+        await this.plugin.restoreSnapshot(row.file);
+        this.scheduleRefresh.cancel();
+        await this.refresh(false);
+      };
+    }
+  }
+
+  /** Append-only reseal history, read from the sealed payload's reseal_log. */
+  private renderCommentLog(parent: HTMLElement, row: ScanRow): void {
+    const p = row.result.payload as Record<string, unknown> | undefined;
+    const log = p && Array.isArray(p.reseal_log) ? (p.reseal_log as ResealComment[]) : [];
+    const entries = log.filter((e) => e && typeof e === "object" && typeof e.comment === "string" && e.comment.trim());
+    if (entries.length === 0) return;
+    const box = parent.createDiv({ cls: "knobe-lens-comment-log" });
+    box.createEl("h5", { text: "Seal history", cls: "knobe-lens-section" });
+    const ul = box.createEl("ul", {
+      cls: "knobe-lens-comment-list",
+      attr: { "aria-label": `${entries.length} seal comment${entries.length === 1 ? "" : "s"}` },
+    });
+    for (const c of [...entries].reverse()) {
+      const li = ul.createEl("li", { cls: "knobe-lens-comment-item" });
+      if (typeof c.at === "string" && c.at) {
+        li.createEl("time", { cls: "knobe-lens-comment-when", text: c.at, attr: { datetime: c.at } });
+      }
+      li.createDiv({ cls: "knobe-lens-comment-text", text: c.comment });
+    }
   }
 
   private async renderBreakInspector(parent: HTMLElement, row: ScanRow): Promise<void> {

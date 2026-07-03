@@ -1,8 +1,8 @@
 import { Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { verify, hasKnobeMarker, KNOBE_BEGIN_B64 } from "./lens-core";
-import { isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
+import { isFiledUnder, isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
-import { sealKnobe, splitNote, SealFields } from "./seal";
+import { sealKnobe, splitNote, SealFields, ResealComment } from "./seal";
 import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./settings";
 import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./trust";
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
@@ -200,6 +200,68 @@ export default class KnobeLensPlugin extends Plugin {
     }
   }
 
+  /** Re-verify flow for a filed object that was edited since sealing: re-seal the
+   *  current content, append the author's comment to the payload's reseal_log, and
+   *  record the prior object as a "reverified-from" parent. Also records a local
+   *  "trusted" verdict on the new hash and clears the now-stale one. Refuses on a
+   *  broken seal (would launder a tampered record). The comment is optional. */
+  async resealWithComment(file: TFile, comment: string): Promise<void> {
+    try {
+      const raw = await this.app.vault.read(file);
+      if (this.isForeignKnobe(raw)) {
+        new Notice("Cannot reseal: this is a KNOBE.AI 0.1 object, which this tool can't re-seal.");
+        return;
+      }
+      const current = await verify(raw);
+      // Seal block must be intact (verified or body-modified) — never reseal a
+      // failed/unreadable object.
+      if (current.state !== "verified" && current.state !== "verified-body-modified") {
+        new Notice("Cannot reverify: the seal is not intact. Inspect it first.");
+        return;
+      }
+      const p = current.payload ?? {};
+      const oldHash = current.computed;
+      const note = comment.trim();
+
+      // Append to the existing reseal_log (append-only history), only when the
+      // author actually left a comment — an empty reseal must stay byte-stable.
+      const prevLog: ResealComment[] = Array.isArray(p.reseal_log)
+        ? (p.reseal_log as ResealComment[]).filter((e) => e && typeof e === "object" && typeof e.comment === "string")
+        : [];
+      let reseal_log = prevLog;
+      if (note) {
+        const entry: ResealComment = { at: new Date().toISOString(), comment: note };
+        if (typeof p.body_hash === "string") entry.prev_body_hash = p.body_hash;
+        if (oldHash) entry.prev_payload_hash = oldHash;
+        reseal_log = [...prevLog, entry];
+      }
+
+      // Preserve existing lineage parents and add a reverified-from edge (mirrors promote()).
+      const existing = (Array.isArray(p.parents) ? (p.parents as unknown[]) : []).filter(
+        (q): q is Record<string, unknown> =>
+          !!q && typeof q === "object" && typeof (q as Record<string, unknown>).payload_hash === "string"
+          && HEX64.test((q as Record<string, string>).payload_hash),
+      );
+      const parents = oldHash ? [...existing, { payload_hash: oldHash, relation: "reverified-from" }] : existing;
+
+      const sealed = await this.buildSealed(file, raw, { reseal_log, parents } as Partial<SealFields>);
+      if (sealed === raw) {
+        new Notice("Nothing to reverify — content and seal are already current.");
+        return;
+      }
+      await this.app.vault.modify(file, sealed);
+
+      // Bind trust to the new content hash and drop the stale verdict.
+      const newHash = (await verify(sealed)).computed;
+      if (newHash) await this.setVerdict(newHash, "trusted", note || "Reverified after edit");
+      if (oldHash && oldHash !== newHash) await this.clearVerdict(oldHash);
+      new Notice(`Reverified and resealed "${this.fieldsFor(file).title}".`);
+    } catch (e) {
+      console.error("[knobe-lens] resealWithComment failed:", e);
+      new Notice("Reverify failed — see the developer console.");
+    }
+  }
+
   private scheduleReseal(file: TFile): void {
     const prev = this.resealTimers.get(file.path);
     if (prev) window.clearTimeout(prev);
@@ -218,6 +280,11 @@ export default class KnobeLensPlugin extends Plugin {
       // HTML envelope; re-sealing one of those would rewrite it as a 1.0 B64 seal
       // and corrupt the author's object. Require a real B64 block before going on.
       if (!raw.includes(KNOBE_BEGIN_B64)) return;
+      // Filed (portfolio) objects are deliberately NOT auto-resealed. A body edit
+      // to a filed object must surface as "needs reverify" and require an explicit,
+      // comment-carrying reseal (resealWithComment) — silently re-sealing it would
+      // re-verify content the user hasn't re-reviewed, defeating the reverify flow.
+      if (isFiledUnder(file.path, this.settings.portfolioRoot)) return;
       // Only re-seal notes whose existing B64 seal is intact — never launder a
       // broken/unsupported one. Reseal exists to keep a working seal valid.
       const state = (await verify(raw)).state;

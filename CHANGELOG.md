@@ -4,6 +4,45 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-07-02
+
+### Added
+
+- **Saved & verified checkmark.** Filed (portfolio) objects whose seal is intact
+  now carry a green "Saved & verified" badge on the card and in the detail pane.
+- **Reverify flow.** Editing a filed object's body no longer goes unnoticed: the
+  card shows an orange **Reverify?** button with an explanation, and the detail
+  pane presents the changes since the last verified seal (additions in red
+  underline, removals in red strikethrough), an optional comment field, and a
+  **Reverify & reseal** action. Screen-reader users get "Added:"/"Removed:"
+  prefixes on diff lines rather than color alone.
+- **Seal comments (`reseal_log`).** Comments entered when resealing are stored
+  as an append-only log *inside the sealed payload* — integrity-protected by
+  `payload_hash`, they travel with the file and render as a "Seal history"
+  section. Reverifies also record a `reverified-from` lineage parent.
+- **Dark mode.** The panel now follows Obsidian's light/dark appearance toggle
+  (including "Adapt to system"): warm parchment in light mode, neutral
+  charcoal in dark mode, with status colors tuned for >=4.5:1 contrast in both.
+
+### Changed
+
+- **Filed objects are no longer auto-resealed on save.** With "Reseal on save"
+  enabled, edits to a filed+trusted object previously re-sealed silently —
+  laundering unreviewed changes back to "verified". Filed objects now surface
+  as **Reverify?** and require an explicit, comment-carrying reseal.
+
+### Fixed
+
+- **Native dark-control chrome.** Card title buttons and the "Move to
+  portfolio" select rendered as dark native macOS widgets on the warm canvas
+  (dark-mode Macs) because they were never given an explicit background /
+  `appearance`. All plugin controls are now explicitly styled, with a custom
+  select chevron in both modes.
+- **Button text contrast.** Colored action buttons ("Trust to file", "Rescan",
+  "Verify a document…") relied on the theme-dependent `--text-on-accent` and
+  could render near-black text on colored surfaces. Button text is now pinned
+  white on AA-safe surfaces in both light and dark modes.
+
 ## [0.6.1] - 2026-07-02
 
 ### Fixed

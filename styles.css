@@ -1,4 +1,26 @@
 .knobe-lens {
+  /* Button surfaces are mode-INDEPENDENT: each is dark enough that the explicit
+     white button text clears WCAG AA (>=4.5:1) on both warm canvases. The
+     mode-tuned --color-* vars below are for text/badges/borders only — in dark
+     mode they go lighter, which would break white-on-color buttons. */
+  --knobe-btn-green: #15711b;
+  --knobe-btn-orange: #b5560a;
+  --knobe-btn-red: #b3261e;
+  --knobe-btn-purple: #5b3fa8;
+  --knobe-btn-blue: #1857c4;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px 18px;
+  background: var(--knobe-canvas);
+  color: var(--text-normal);
+}
+
+/* Warm palette, light mode. Scoped to Obsidian's body class so the panel follows
+   the appearance toggle (and "Adapt to system", which drives the same class).
+   Native <button>/<select> chrome (appearance: auto) is painted by the OS, not
+   our palette — the form-field surfaces + color-scheme keep controls on-canvas. */
+body.theme-light .knobe-lens {
+  --knobe-canvas: #f6eed8;
   --background-primary: #fffdf7;
   --background-primary-alt: #fbf4e3;
   --background-secondary: #eee3c7;
@@ -8,17 +30,43 @@
   --text-muted: #5d5547;
   --text-faint: #6d6455;
   --text-accent: #5a4b22;
-  /* Status colors darkened for >=4.5:1 text contrast on the forced-light warm
-     canvas (the theme defaults are tuned for its own background, not this one). */
+  /* Status colors darkened for >=4.5:1 text contrast on the light warm canvas. */
   --color-green: #15711b;
   --color-yellow: #8a6d00;
   --color-red: #b3261e;
-  min-height: 100%;
-  box-sizing: border-box;
-  padding: 8px 10px 18px;
-  background: #f6eed8;
-  color: var(--text-normal);
+  --color-orange: #b5560a;
+  --color-purple: #5b3fa8;
+  --interactive-normal: #f1e7c8;
+  --interactive-hover: #e8dcbb;
+  --background-modifier-form-field: #fffdf7;
   color-scheme: light;
+}
+
+/* Warm palette, dark mode: NEUTRAL charcoal-black, not brown — brown-tinted
+   surfaces read as an off-color island against dark app chrome. The canvas
+   matches the companion theme's dark background (#1e1d1b) so the panel sits
+   flush with the vault; warmth lives in the cream text and status colors, not
+   the surfaces. Status colors lightened for >=4.5:1 text contrast. */
+body.theme-dark .knobe-lens {
+  --knobe-canvas: #1b1b1b;
+  --background-primary: #232323;
+  --background-primary-alt: #282828;
+  --background-secondary: #2d2d2d;
+  --background-modifier-border: #3e3e3e;
+  --background-modifier-border-hover: #565656;
+  --text-normal: #e8e5de;
+  --text-muted: #b5b1a8;
+  --text-faint: #918d84;
+  --text-accent: #d8c48e;
+  --color-green: #7fc98b;
+  --color-yellow: #d3b855;
+  --color-red: #ff8a80;
+  --color-orange: #eda15f;
+  --color-purple: #c0a8ee;
+  --interactive-normal: #282828;
+  --interactive-hover: #303030;
+  --background-modifier-form-field: #232323;
+  color-scheme: dark;
 }
 .knobe-lens-header {
   display: flex;
@@ -359,17 +407,27 @@ h5.knobe-lens-section {
   margin-top: 10px;
 }
 .knobe-lens-action-button {
+  appearance: none;
+  -webkit-appearance: none;
   min-height: 32px;
   border-width: 1px;
   border-style: solid;
-  color: var(--text-on-accent);
+  /* Explicit #fff, not var(--text-on-accent): on the warm canvas that variable
+     resolves dark (or is undefined and inherits --text-normal), leaving the
+     colored buttons with near-black text. The accent colors above are darkened
+     enough that white text clears WCAG AA (>=4.5:1) on all four tones. */
+  color: #fff;
   font-weight: var(--font-medium);
 }
 .knobe-lens-primary-action {
+  appearance: none;
+  -webkit-appearance: none;
   min-height: 32px;
-  border: 1px solid var(--color-blue);
-  background-color: var(--color-blue);
-  color: var(--text-on-accent);
+  border: 1px solid var(--knobe-btn-blue);
+  background-color: var(--knobe-btn-blue);
+  /* Explicit #fff, same reasoning as .knobe-lens-action-button: --text-on-accent
+     is theme-dependent and resolves dark on the warm palette. #1857c4 vs #fff = 5.66:1. */
+  color: #fff;
   font-weight: var(--font-medium);
 }
 .knobe-lens-primary-action:hover:not(:disabled) {
@@ -380,20 +438,20 @@ h5.knobe-lens-section {
   outline-offset: 2px;
 }
 .knobe-lens-action-button.is-trust {
-  background-color: var(--color-green);
-  border-color: var(--color-green);
+  background-color: var(--knobe-btn-green);
+  border-color: var(--knobe-btn-green);
 }
 .knobe-lens-action-button.is-reject {
-  background-color: var(--color-red);
-  border-color: var(--color-red);
+  background-color: var(--knobe-btn-red);
+  border-color: var(--knobe-btn-red);
 }
 .knobe-lens-action-button.is-clear {
-  background-color: var(--color-purple);
-  border-color: var(--color-purple);
+  background-color: var(--knobe-btn-purple);
+  border-color: var(--knobe-btn-purple);
 }
 .knobe-lens-action-button.is-promote {
-  background-color: var(--color-orange);
-  border-color: var(--color-orange);
+  background-color: var(--knobe-btn-orange);
+  border-color: var(--knobe-btn-orange);
 }
 .knobe-lens-action-button:hover:not(:disabled) {
   filter: brightness(0.9);
@@ -464,9 +522,34 @@ h5.knobe-lens-section {
   font-weight: var(--font-medium);
 }
 .knobe-lens-move {
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+  padding: 5px 26px 5px 8px;
   font-size: 12px;
+  color: var(--text-normal);
+  background-color: var(--background-modifier-form-field);
+  /* Custom chevron: appearance:none drops the native arrow, and the native one
+     would be dark-mode-tinted anyway. Inline SVG stroked in --text-muted. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%235d5547' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M2.75 4.5 6 7.75 9.25 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+}
+.knobe-lens-move:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+/* Dark mode: restroke the chevron in the dark palette's muted cream (SVG data
+   URIs can't reference CSS variables). */
+body.theme-dark .knobe-lens .knobe-lens-move {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23b5b1a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M2.75 4.5 6 7.75 9.25 4.5'/%3E%3C/svg%3E");
 }
 .knobe-lens-move:focus-visible {
   outline: 2px solid var(--interactive-accent);
@@ -604,6 +687,8 @@ h5.knobe-lens-section {
 
 /* Card trigger: a real button provides click, keyboard, and voice semantics. */
 .knobe-lens-row-trigger {
+  appearance: none;
+  -webkit-appearance: none;
   display: block;
   min-width: 0;
   max-width: 100%;
@@ -658,4 +743,125 @@ h5.knobe-lens-section {
   .knobe-lens-card {
     border-color: CanvasText;
   }
+}
+
+/* ---- Saved & verified / reverify (filed objects) ------------------------- */
+
+/* Checkmark on a filed card whose seal is intact. Icon + text, never colour
+   alone; green clears AA on the warm card. */
+.knobe-lens-saved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 0 2px;
+  color: var(--color-green);
+  font-weight: var(--font-medium);
+  font-size: 12px;
+}
+.knobe-lens-saved-badge .knobe-lens-badge-icon {
+  display: inline-flex;
+}
+.knobe-lens-saved-badge .knobe-lens-badge-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Orange "Reverify?" prompt on an edited filed card. */
+.knobe-lens-reverify {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 4px 0 2px;
+}
+.knobe-lens-action-button.is-reverify {
+  background-color: var(--knobe-btn-orange);
+  border: 1px solid var(--knobe-btn-orange);
+  min-height: 26px;
+  padding: 2px 10px;
+  border-radius: var(--radius-s, 4px);
+}
+.knobe-lens-reverify-hint {
+  font-size: 11px;
+  color: var(--color-yellow); /* #8a6d00 — passes as text, so the meaning isn't orange-only */
+}
+
+/* ---- Reverify detail section: change diff, comment field, history -------- */
+
+.knobe-lens-seal,
+.knobe-lens-comment-log {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.knobe-lens-seal-changes {
+  margin: 8px 0;
+}
+/* Added/changed lines: red + underline. Removed lines: red + strikethrough. */
+.knobe-lens-seal-diff {
+  line-height: 1.5;
+}
+.knobe-lens-seal-diff .seal-add {
+  color: var(--color-red);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+.knobe-lens-seal-diff .seal-del {
+  color: var(--color-red);
+  text-decoration: line-through;
+}
+
+.knobe-lens-reseal-form {
+  margin: 8px 0 2px;
+}
+.knobe-lens-seal-comment {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 44px;
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+}
+.knobe-lens-seal-comment:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.knobe-lens-comment-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.knobe-lens-comment-item {
+  padding: 8px 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-green);
+}
+.knobe-lens-comment-when {
+  display: block;
+  font-family: var(--font-monospace);
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 3px;
+}
+.knobe-lens-comment-text {
+  font-size: 12px;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (forced-colors: active) {
+  .knobe-lens-seal-diff .seal-add { text-decoration: underline; }
+  .knobe-lens-seal-diff .seal-del { text-decoration: line-through; }
+  .knobe-lens-comment-item { border-color: CanvasText; }
 }

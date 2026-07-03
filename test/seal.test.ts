@@ -66,4 +66,26 @@ describe("sealer round-trips through the verifier", () => {
     const twice = await sealKnobe(split.frontmatter, split.body, fields(), { embedBody: true });
     expect(twice).toBe(once);
   });
+
+  it("reseal_log rides inside the sealed payload, verifies, and stays conformant", async () => {
+    const withLog = (): SealFields => ({
+      ...fields(),
+      reseal_log: [{ at: "2026-07-02T10:00:00.000Z", comment: "fixed the citation in §2", prev_payload_hash: "abc" }],
+    });
+    const r = await verify(await sealKnobe(FM, BODY, withLog()));
+    expect(r.state).toBe("verified");
+    // The comment history is integrity-protected (covered by payload_hash) and
+    // all-string, so conformance stays valid — no numeric-path downgrade.
+    expect(r.conformance).toBe("valid");
+    const log = (r.payload as Record<string, unknown>).reseal_log as Array<{ comment: string }>;
+    expect(Array.isArray(log)).toBe(true);
+    expect(log[0].comment).toBe("fixed the citation in §2");
+  });
+
+  it("a note without reseal_log seals identically to before (back-compat)", async () => {
+    const sealed = await sealKnobe(FM, BODY, fields());
+    expect(sealed).not.toContain("reseal_log");
+    const r = await verify(sealed);
+    expect(r.state).toBe("verified");
+  });
 });

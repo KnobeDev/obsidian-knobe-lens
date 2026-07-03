@@ -9,6 +9,21 @@
 
 import { payloadHashOf, bodyHashOf, KNOBE_BEGIN_B64, KNOBE_END_B64 } from "./lens-core";
 
+/** One entry in a note's reseal history. Written into the sealed payload (so it
+ *  round-trips with the file and is covered by payload_hash), appended only on an
+ *  explicit, comment-carrying reseal — never by auto-reseal-on-save. All fields
+ *  are strings so the value never trips the conformance numeric-path check. */
+export interface ResealComment {
+  /** ISO timestamp of the reseal. */
+  at: string;
+  /** The author's note about what changed. */
+  comment: string;
+  /** body_hash in effect just before this reseal (optional). */
+  prev_body_hash?: string;
+  /** payload_hash the reseal descends from (optional; ties to lineage). */
+  prev_payload_hash?: string;
+}
+
 export interface SealFields {
   title: string;
   summary: string;
@@ -18,6 +33,8 @@ export interface SealFields {
   privacy_level: string;
   quarantine_status: string;
   attribution: { sources: Array<Record<string, unknown>> };
+  /** Append-only log of reseal comments, carried inside the sealed payload. */
+  reseal_log?: ResealComment[];
   [k: string]: unknown;
 }
 
