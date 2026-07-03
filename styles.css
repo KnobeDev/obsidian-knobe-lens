@@ -415,8 +415,11 @@ h5.knobe-lens-section {
   /* Explicit #fff, not var(--text-on-accent): on the warm canvas that variable
      resolves dark (or is undefined and inherits --text-normal), leaving the
      colored buttons with near-black text. The accent colors above are darkened
-     enough that white text clears WCAG AA (>=4.5:1) on all four tones. */
-  color: #fff;
+     enough that white text clears WCAG AA (>=4.5:1) on all four tones.
+     !important: Obsidian's own `button:not(.clickable-icon)` rule out-specifies
+     this single class and repaints the label with the theme text color — dark
+     in light mode — without it. */
+  color: #fff !important;
   font-weight: var(--font-medium);
 }
 .knobe-lens-primary-action {
@@ -424,10 +427,14 @@ h5.knobe-lens-section {
   -webkit-appearance: none;
   min-height: 32px;
   border: 1px solid var(--knobe-btn-blue);
-  background-color: var(--knobe-btn-blue);
+  /* background !important too: this rule is single-class, so Obsidian's
+     button rule would otherwise repaint Rescan/Verify with the gray
+     --interactive-normal surface. */
+  background-color: var(--knobe-btn-blue) !important;
   /* Explicit #fff, same reasoning as .knobe-lens-action-button: --text-on-accent
-     is theme-dependent and resolves dark on the warm palette. #1857c4 vs #fff = 5.66:1. */
-  color: #fff;
+     is theme-dependent and resolves dark on the warm palette. #1857c4 vs #fff = 5.66:1.
+     !important: see .knobe-lens-action-button — Obsidian's button rule out-specifies us. */
+  color: #fff !important;
   font-weight: var(--font-medium);
 }
 .knobe-lens-primary-action:hover:not(:disabled) {
@@ -459,6 +466,27 @@ h5.knobe-lens-section {
 .knobe-lens-action-button:focus-visible {
   outline: 2px solid var(--text-normal);
   outline-offset: 2px;
+}
+/* Icon + label buttons (Confirmed / Make Comment and Reseal / EDITED, RECONFIRM) */
+.knobe-lens-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.knobe-lens-btn-icon {
+  display: inline-flex;
+}
+.knobe-lens-btn-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.knobe-lens-card-action {
+  width: 100%;
+}
+.knobe-lens-action-button.is-confirmed {
+  background-color: var(--knobe-btn-green);
+  border-color: var(--knobe-btn-green);
 }
 .knobe-lens-action-button:disabled {
   opacity: 0.55;
@@ -864,4 +892,28 @@ body.theme-dark .knobe-lens .knobe-lens-move {
   .knobe-lens-seal-diff .seal-add { text-decoration: underline; }
   .knobe-lens-seal-diff .seal-del { text-decoration: line-through; }
   .knobe-lens-comment-item { border-color: CanvasText; }
+}
+
+/* ---- In-editor "EDITED, RECONFIRM" highlights ----------------------------
+   Applied as CodeMirror line decorations by openWithEditedHighlights(): every
+   line changed since the last verified seal gets a red tint, left bar, and
+   underline until the note is reopened or resealed. */
+.knobe-edited-line {
+  background-color: rgba(196, 49, 38, 0.12);
+  box-shadow: inset 3px 0 0 #c43126;
+  text-decoration: underline;
+  text-decoration-color: #c43126;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+body.theme-dark .knobe-edited-line {
+  background-color: rgba(255, 138, 128, 0.14);
+  box-shadow: inset 3px 0 0 #ff8a80;
+  text-decoration-color: #ff8a80;
+}
+@media (forced-colors: active) {
+  .knobe-edited-line {
+    text-decoration: underline;
+    outline: 1px solid CanvasText;
+  }
 }

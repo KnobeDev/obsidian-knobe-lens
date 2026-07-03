@@ -38,3 +38,27 @@ export function lineDiff(oldText: string, newText: string): DiffOp[] {
   while (j < n) ops.push({ type: "add", line: b[j++] });
   return ops;
 }
+
+/**
+ * 1-based line numbers in `newText` that changed relative to `oldText`:
+ * added lines directly, and for deletions the line adjacent to the removal
+ * point (so a pure deletion still gets a visible marker). Drives the
+ * in-editor "EDITED, RECONFIRM" highlights.
+ */
+export function changedLineNumbers(oldText: string, newText: string): number[] {
+  const out = new Set<number>();
+  let newLine = 0; // lines of newText consumed so far
+  for (const op of lineDiff(oldText, newText)) {
+    if (op.type === "same") {
+      newLine++;
+    } else if (op.type === "add") {
+      newLine++;
+      out.add(newLine);
+    } else {
+      // Deletion: mark the boundary it happened at in the new text.
+      out.add(Math.max(1, newLine));
+      out.add(newLine + 1); // may exceed the doc; callers clamp
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}

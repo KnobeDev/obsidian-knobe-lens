@@ -4,6 +4,30 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-07-02
+
+### Added
+
+- **Tri-state card actions.** The card button now states its truth:
+  - **✓ Confirmed** (green) — saved & verified objects; opens the detail view.
+  - **🔍 Make Comment and Reseal** (green/orange/red by risk) — objects not yet
+    confirmed by the user; opens a comment dialog that collects your thoughts
+    and seals them into the object's history, recording your trust.
+  - **⚠🔍 EDITED, RECONFIRM** (orange) — filed objects edited after sealing
+    (e.g. by an AI tool); opens the note itself with every changed line
+    prominently highlighted, then comment & reseal from KNOBE Lens.
+- **In-editor change highlights.** "EDITED, RECONFIRM" marks each line changed
+  since the last verified seal directly in the editor — red tint, left bar,
+  and underline — scrolled to the first change (CodeMirror line decorations).
+
+### Fixed
+
+- **Button text unreadable in light mode.** Obsidian's own
+  `button:not(.clickable-icon)` rule out-specifies the plugin's single-class
+  button styles, repainting labels with the theme text color (dark on dark
+  green in light mode) and the Rescan/Verify surface gray. Button text and the
+  primary-action surface are now pinned with `!important`.
+
 ## [0.7.0] - 2026-07-02
 
 ### Added

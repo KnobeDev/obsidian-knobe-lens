@@ -1,4 +1,7 @@
-import { Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
+import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
+import { changedLineNumbers } from "./diff";
 import { verify, hasKnobeMarker, KNOBE_BEGIN_B64 } from "./lens-core";
 import { isFiledUnder, isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
@@ -20,6 +23,33 @@ const SETTINGS_KEYS: (keyof KnobeLensSettings)[] = [
   "privacyLevel", "quarantineStatus", "defaultSummary", "resealOnSave",
   "embedBodySnapshot", "portfolioRoot",
 ];
+
+/* ---- in-editor "EDITED, RECONFIRM" highlights ----------------------------
+ * A CodeMirror line-decoration field. openWithEditedHighlights() dispatches
+ * the changed line numbers into the active editor; the lines render with the
+ * .knobe-edited-line class (red tint + underline) until the effect is cleared
+ * or the note is reopened. Decorations map across further edits.
+ */
+const setEditedLines = StateEffect.define<number[] | null>();
+const editedLinesField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setEditedLines)) continue;
+      if (!e.value) return Decoration.none;
+      const builder = new RangeSetBuilder<Decoration>();
+      for (const ln of e.value) {
+        if (ln < 1 || ln > tr.state.doc.lines) continue;
+        const line = tr.state.doc.line(ln);
+        builder.add(line.from, line.from, Decoration.line({ class: "knobe-edited-line" }));
+      }
+      return builder.finish();
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 interface Snapshot {
   hash: string;
@@ -85,6 +115,8 @@ export default class KnobeLensPlugin extends Plugin {
       name: "Submit a document for verification (create report)",
       callback: () => void this.verifyAndReport(),
     });
+
+    this.registerEditorExtension(editedLinesField);
 
     this.statusBar = this.addStatusBarItem();
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => void this.updateStatusBar()));
@@ -259,6 +291,46 @@ export default class KnobeLensPlugin extends Plugin {
     } catch (e) {
       console.error("[knobe-lens] resealWithComment failed:", e);
       new Notice("Reverify failed — see the developer console.");
+    }
+  }
+
+  /** Open a note and prominently mark every line that changed since the last
+   *  verified seal (red tint + underline), scrolled to the first change. Used
+   *  by the card's "EDITED, RECONFIRM" action. */
+  async openWithEditedHighlights(file: TFile): Promise<void> {
+    const snap = this.snapshotFor(file.path);
+    const leaf = this.app.workspace.getLeaf(true);
+    await leaf.openFile(file);
+    if (!snap) {
+      new Notice("No last-verified snapshot to compare against.");
+      return;
+    }
+    try {
+      const raw = await this.app.vault.read(file);
+      // Full-content diff: line numbers land directly on file lines. The seal
+      // block and frontmatter are identical between snapshot and a body-edited
+      // file, so only real edits highlight.
+      const lines = changedLineNumbers(snap.content, raw);
+      if (lines.length === 0) {
+        new Notice("No line-level changes since the last verified seal.");
+        return;
+      }
+      const view = leaf.view instanceof MarkdownView ? leaf.view : null;
+      const cm = (view?.editor as unknown as { cm?: EditorView } | undefined)?.cm;
+      if (!cm) {
+        new Notice(`${lines.length} line(s) changed since sealing — see the KNOBE Lens diff.`);
+        return;
+      }
+      const clamped = lines.filter((n) => n >= 1 && n <= cm.state.doc.lines);
+      const first = clamped[0] ? cm.state.doc.line(clamped[0]).from : 0;
+      cm.dispatch({
+        effects: [setEditedLines.of(clamped), EditorView.scrollIntoView(first, { y: "center" })],
+        selection: { anchor: first },
+      });
+      new Notice(`${clamped.length} changed line(s) highlighted. Review, then Comment & reseal in KNOBE Lens.`);
+    } catch (e) {
+      console.error("[knobe-lens] openWithEditedHighlights failed:", e);
+      new Notice("Could not highlight changes — see the developer console.");
     }
   }
 

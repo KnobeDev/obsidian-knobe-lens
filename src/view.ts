@@ -19,6 +19,7 @@ import {
   TrustToFilePolicy,
 } from "./board-interactions";
 import { TrustConfirmModal } from "./trust-confirm-modal";
+import { SealCommentModal } from "./seal-comment-modal";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
 const BODY_PREVIEW_LINES = 10;
@@ -348,11 +349,11 @@ export class KnobeLensView extends ItemView {
       });
       setIcon(handle, "grip-vertical");
 
-      // Filed objects carry a saved/verified indicator: a checkmark when the seal
-      // is intact, or an orange "Reverify?" prompt when the body changed since sealing.
-      const saved = savedState(true, row.result.state, row.result.conformance);
-      if (saved === "needs-reverify") this.reverifyControl(card, row);
-      else if (saved === "saved-verified") this.savedVerifiedBadge(card);
+      // Filed objects with an intact seal carry the checkmark badge; the footer
+      // action button expresses the confirmed / edited-reconfirm states.
+      if (savedState(true, row.result.state, row.result.conformance) === "saved-verified") {
+        this.savedVerifiedBadge(card);
+      }
     }
 
     const trigger = card.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-card-title" });
@@ -402,26 +403,66 @@ export class KnobeLensView extends ItemView {
     });
 
     const trusted = getVerdict(this.plugin.trust, row.payloadHash)?.verdict === "trusted";
-    if (!trusted) {
-      const policy = trustToFilePolicy(row.result.state);
-      const trustToFile = td.createEl("button", {
-        cls: `knobe-lens-action-button is-${policy.tone} knobe-lens-trust-to-file`,
-        text: "Trust to file",
+    const filed = this.isFiled(row);
+    const saved = savedState(filed, row.result.state, row.result.conformance);
+    // Filing is allowed once the user has confirmed the object (local trusted
+    // verdict) — and an already saved-and-verified object may always be refiled.
+    const canFile = trusted || saved === "saved-verified";
+
+    /* ---- card action button: one honest state ---- */
+    if (saved === "saved-verified") {
+      // ✓ Confirmed — saved, sealed, intact. Click shows the details/history.
+      const btn = this.iconTextButton(td, ["check-square"], "Confirmed",
+        "knobe-lens-action-button is-confirmed knobe-lens-card-action");
+      btn.setAttr("aria-label", `"${row.title}" is saved and verified — view details and seal history`);
+      btn.onclick = () => void this.select(row);
+    } else if (saved === "needs-reverify") {
+      // ⚠🔍 Edited since sealing — open the note with changed lines highlighted.
+      const btn = this.iconTextButton(td, ["alert-triangle", "search"], "EDITED, RECONFIRM",
+        "knobe-lens-action-button is-reverify knobe-lens-card-action");
+      btn.setAttr("aria-label",
+        `"${row.title}" was edited after sealing — open it with the changes highlighted, then comment and reseal`);
+      btn.onclick = async () => {
+        await this.select(row); // detail pane holds the diff + comment form for the return trip
+        await this.plugin.openWithEditedHighlights(row.file);
+      };
+      td.createEl("div", {
+        cls: "knobe-lens-move-help",
+        text: "Changed since it was sealed — review the highlighted lines, then comment and reseal.",
+        attr: { id: helpId },
       });
+    } else if (!filed) {
+      // 🔍 Not yet saved by the user — collect their thoughts and seal.
+      const policy = trustToFilePolicy(row.result.state);
+      const btn = this.iconTextButton(td, ["search"], "Make Comment and Reseal",
+        `knobe-lens-action-button is-${policy.tone} knobe-lens-card-action`);
       if (!row.payloadHash) {
-        trustToFile.setAttr("disabled", "true");
-        trustToFile.setAttr("aria-describedby", helpId);
+        btn.setAttr("disabled", "true");
+        btn.setAttr("aria-describedby", helpId);
       } else {
-        trustToFile.onclick = () => this.requestTrustToFile(row, policy);
+        btn.onclick = () => this.requestCommentReseal(row, policy);
       }
+      td.createEl("div", {
+        cls: "knobe-lens-move-help",
+        text: row.payloadHash
+          ? "Add your thoughts and reseal to confirm this object, then file it."
+          : "Unreadable objects cannot be resealed.",
+        attr: { id: helpId },
+      });
+    } else {
+      // Filed but the seal is broken/unreadable — route to the Break inspector.
+      td.createEl("div", {
+        cls: "knobe-lens-move-help",
+        text: "Seal broken — open this object to inspect and repair it.",
+        attr: { id: helpId },
+      });
+    }
+
+    /* ---- the move select ---- */
+    if (!canFile) {
       select.createEl("option", { text: "Move to portfolio…", attr: { value: NO_FOLDER_VALUE } });
       select.setAttr("disabled", "true");
       select.setAttr("aria-describedby", helpId);
-      td.createEl("div", {
-        cls: "knobe-lens-move-help",
-        text: row.payloadHash ? "Trust this object before filing it." : "Unreadable objects cannot be trusted.",
-        attr: { id: helpId },
-      });
       return;
     }
 
@@ -469,24 +510,45 @@ export class KnobeLensView extends ItemView {
     });
   }
 
-  private requestTrustToFile(row: ScanRow, policy: TrustToFilePolicy): void {
-    const applyTrust = async (): Promise<void> => {
-      if (!row.payloadHash) return;
-      await this.plugin.setVerdict(row.payloadHash, "trusted", "Trusted from filing control");
-      this.setActionStatus(`Trusted "${row.title}". Choose a portfolio to file it.`);
-      await this.refresh(false);
-      this.rowTriggers.get(row.file.path)?.focus();
+  /** A button with one or more Lucide icons before its label. */
+  private iconTextButton(parent: HTMLElement, icons: string[], label: string, cls: string): HTMLButtonElement {
+    const btn = parent.createEl("button", { cls: `${cls} knobe-lens-icon-button` });
+    for (const icon of icons) setIcon(btn.createSpan({ cls: "knobe-lens-btn-icon" }), icon);
+    btn.createSpan({ text: label });
+    return btn;
+  }
+
+  /** "Make Comment and Reseal": collect the user's thoughts, then reseal (which
+   *  also records a local trusted verdict). Risky states warn first, exactly
+   *  like the old trust flow did. */
+  private requestCommentReseal(row: ScanRow, policy: TrustToFilePolicy): void {
+    const openModal = (): void => {
+      new SealCommentModal(this.app, {
+        title: row.title,
+        onSubmit: async (comment) => {
+          try {
+            await this.plugin.resealWithComment(row.file, comment);
+            this.setActionStatus(`Sealed "${row.title}". Choose a portfolio to file it.`);
+            this.scheduleRefresh.cancel();
+            await this.refresh(false);
+            this.rowTriggers.get(row.file.path)?.focus();
+            return null;
+          } catch (e) {
+            return errorMessage(e);
+          }
+        },
+      }).open();
     };
 
     if (!policy.warning) {
-      void applyTrust();
+      openModal();
       return;
     }
     new TrustConfirmModal(this.app, {
       message: policy.warning,
       tone: policy.tone === "reject" ? "reject" : "promote",
       onReview: () => void this.select(row),
-      onConfirm: applyTrust,
+      onConfirm: async () => openModal(),
     }).open();
   }
 
@@ -614,23 +676,6 @@ export class KnobeLensView extends ItemView {
     });
     setIcon(badge.createSpan({ cls: "knobe-lens-badge-icon" }), "badge-check");
     badge.createSpan({ text: "Saved & verified" });
-  }
-
-  /** Orange prompt shown on a filed card whose body was edited since sealing.
-   *  Clicking opens the detail pane, where the change diff + reseal-with-comment
-   *  flow lives. The visible hint keeps the meaning off colour alone (SC 1.4.1). */
-  private reverifyControl(parent: HTMLElement, row: ScanRow): void {
-    const wrap = parent.createDiv({ cls: "knobe-lens-reverify" });
-    const btn = wrap.createEl("button", {
-      cls: "knobe-lens-action-button is-reverify",
-      text: "Reverify?",
-    });
-    btn.setAttr("aria-label", `Reverify "${row.title}" — it changed since it was sealed`);
-    btn.onclick = () => void this.select(row);
-    wrap.createSpan({
-      cls: "knobe-lens-reverify-hint",
-      text: "Edited since last seal — review the changes and reseal.",
-    });
   }
 
   private renderLineage(): void {
