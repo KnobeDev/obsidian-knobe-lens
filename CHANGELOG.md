@@ -4,6 +4,16 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-07-02
+
+### Changed
+
+- **Confirmed state on the card button.** A verified object you have already
+  confirmed — a saved-and-verified filed object, or any verified object with a
+  trusted verdict — now shows a **✓ Confirmed** button (opens its details and
+  seal history). Verified objects you haven't confirmed yet still show
+  **Make Comment & Verify**.
+
 ## [0.9.0] - 2026-07-02
 
 ### Added

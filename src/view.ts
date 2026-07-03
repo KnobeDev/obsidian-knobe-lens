@@ -412,17 +412,32 @@ export class KnobeLensView extends ItemView {
     /* ---- card action button: label + behavior by recognition state ---- */
     const state = row.result.state;
     if (state === "verified") {
-      // Cryptographically intact — record the user's thoughts and seal them in.
-      const label = filed ? "Make Comment & Reseal" : "Make Comment & Verify";
-      const btn = this.iconTextButton(td, ["message-square-plus"], label,
-        "knobe-lens-action-button is-trust knobe-lens-card-action");
-      btn.setAttr("aria-label", `${label} "${row.title}" — record your thoughts and seal them into its history`);
-      btn.onclick = () => this.requestCommentReseal(row, trustToFilePolicy(state));
-      td.createEl("div", {
-        cls: "knobe-lens-move-help",
-        text: "Add your thoughts and seal them into this object's history.",
-        attr: { id: helpId },
-      });
+      // A verified object the user has already confirmed (trusted verdict, or a
+      // saved-and-verified filed object) reads as "Confirmed"; a verified object
+      // not yet confirmed prompts the user to comment and verify it.
+      const confirmed = trusted || saved === "saved-verified";
+      if (confirmed) {
+        const btn = this.iconTextButton(td, ["badge-check"], "Confirmed",
+          "knobe-lens-action-button is-confirmed knobe-lens-card-action");
+        btn.setAttr("aria-label", `"${row.title}" is confirmed — saved and verified. Open it to review or add to its history.`);
+        btn.onclick = () => void this.select(row);
+        td.createEl("div", {
+          cls: "knobe-lens-move-help",
+          text: "Saved and verified. Open it to review or add another comment.",
+          attr: { id: helpId },
+        });
+      } else {
+        const label = filed ? "Make Comment & Reseal" : "Make Comment & Verify";
+        const btn = this.iconTextButton(td, ["message-square-plus"], label,
+          "knobe-lens-action-button is-trust knobe-lens-card-action");
+        btn.setAttr("aria-label", `${label} "${row.title}" — record your thoughts and seal them into its history`);
+        btn.onclick = () => this.requestCommentReseal(row, trustToFilePolicy(state));
+        td.createEl("div", {
+          cls: "knobe-lens-move-help",
+          text: "Add your thoughts and seal them into this object's history.",
+          attr: { id: helpId },
+        });
+      }
     } else {
       // Body modified / failed / unreadable — review before it can be verified.
       const tone = state === "failed" ? "reject" : state === "verified-body-modified" ? "promote" : "muted";
