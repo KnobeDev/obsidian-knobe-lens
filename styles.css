@@ -177,19 +177,44 @@ body.theme-dark .knobe-lens {
   block-size: auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 2.8em;
+  min-height: 2.6em;
   box-sizing: border-box;
-  margin-bottom: 6px;
-  padding: 2px 0 9px;
+  margin-bottom: 7px;
+  /* The title is the review/edit control, so it reads as a tinted button. The
+     tint is set per context below: recognition state on the board, portfolio
+     color in a portfolio. */
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--background-secondary);
   line-height: 1.4;
+  transition: filter 120ms ease;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+.knobe-lens-card-title:hover {
+  filter: brightness(0.96);
+}
 .knobe-lens-card-title + .knobe-lens-path {
   margin-top: 2px;
-  padding-top: 4px;
-  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Recognition board: title tinted a pastel of its verification state. */
+.knobe-lens-kanban-column.state-border-verified .knobe-lens-card-title {
+  background: color-mix(in srgb, var(--color-green) 20%, var(--background-primary));
+}
+.knobe-lens-kanban-column.state-border-verified-body-modified .knobe-lens-card-title {
+  background: color-mix(in srgb, var(--color-yellow) 24%, var(--background-primary));
+}
+.knobe-lens-kanban-column.state-border-failed .knobe-lens-card-title {
+  background: color-mix(in srgb, var(--color-red) 18%, var(--background-primary));
+}
+.knobe-lens-kanban-column.state-border-unreadable .knobe-lens-card-title {
+  background: color-mix(in srgb, var(--text-muted) 16%, var(--background-primary));
+}
+/* Portfolio: title tinted with the portfolio's own color. */
+.knobe-lens-portfolio-cards .knobe-lens-card-title {
+  background: color-mix(in srgb, var(--knobe-portfolio-color, var(--background-secondary)) 24%, var(--background-primary));
 }
 .knobe-lens-card-status {
   display: flex;
@@ -459,6 +484,13 @@ h5.knobe-lens-section {
 .knobe-lens-action-button.is-promote {
   background-color: var(--knobe-btn-orange);
   border-color: var(--knobe-btn-orange);
+}
+/* Neutral grey tone for unreadable objects — normal text, not white (there's no
+   dark accent surface under it), readable in both modes. */
+.knobe-lens-action-button.is-muted {
+  background-color: var(--background-secondary) !important;
+  border-color: var(--background-modifier-border);
+  color: var(--text-normal) !important;
 }
 .knobe-lens-action-button:hover:not(:disabled) {
   filter: brightness(0.9);

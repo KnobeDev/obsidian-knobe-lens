@@ -4,6 +4,27 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-07-02
+
+### Added
+
+- **State-tinted title buttons.** The document title — the control you click to
+  review/edit — is now a tinted button: pastel green (Verified), yellow (Body
+  modified), red (Failed), or grey (Unreadable) on the Recognition board, and
+  the **portfolio's own color** for filed objects. Tints are mode-aware.
+
+### Changed
+
+- **Clearer card action labels, by state.** Verified objects: **Make Comment &
+  Verify** (unfiled) / **Make Comment & Reseal** (filed). Body modified / Failed
+  / Unreadable: **Review Before Verifying**, which opens the object for review —
+  for edited objects, the note opens with the changed lines highlighted.
+
+### Fixed
+
+- **Missing action button in portfolios.** Filed objects with a broken or
+  unreadable seal showed no action button; every card now has one.
+
 ## [0.8.0] - 2026-07-02
 
 ### Added

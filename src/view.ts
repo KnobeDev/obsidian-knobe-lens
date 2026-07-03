@@ -407,55 +407,54 @@ export class KnobeLensView extends ItemView {
     const saved = savedState(filed, row.result.state, row.result.conformance);
     // Filing is allowed once the user has confirmed the object (local trusted
     // verdict) — and an already saved-and-verified object may always be refiled.
-    const canFile = trusted || saved === "saved-verified";
+    const canFile = trusted || saved === "saved-verified" || filed;
 
-    /* ---- card action button: one honest state ---- */
-    if (saved === "saved-verified") {
-      // ✓ Confirmed — saved, sealed, intact. Click shows the details/history.
-      const btn = this.iconTextButton(td, ["check-square"], "Confirmed",
-        "knobe-lens-action-button is-confirmed knobe-lens-card-action");
-      btn.setAttr("aria-label", `"${row.title}" is saved and verified — view details and seal history`);
-      btn.onclick = () => void this.select(row);
-    } else if (saved === "needs-reverify") {
-      // ⚠🔍 Edited since sealing — open the note with changed lines highlighted.
-      const btn = this.iconTextButton(td, ["alert-triangle", "search"], "EDITED, RECONFIRM",
-        "knobe-lens-action-button is-reverify knobe-lens-card-action");
-      btn.setAttr("aria-label",
-        `"${row.title}" was edited after sealing — open it with the changes highlighted, then comment and reseal`);
-      btn.onclick = async () => {
-        await this.select(row); // detail pane holds the diff + comment form for the return trip
-        await this.plugin.openWithEditedHighlights(row.file);
-      };
+    /* ---- card action button: label + behavior by recognition state ---- */
+    const state = row.result.state;
+    if (state === "verified") {
+      // Cryptographically intact — record the user's thoughts and seal them in.
+      const label = filed ? "Make Comment & Reseal" : "Make Comment & Verify";
+      const btn = this.iconTextButton(td, ["message-square-plus"], label,
+        "knobe-lens-action-button is-trust knobe-lens-card-action");
+      btn.setAttr("aria-label", `${label} "${row.title}" — record your thoughts and seal them into its history`);
+      btn.onclick = () => this.requestCommentReseal(row, trustToFilePolicy(state));
       td.createEl("div", {
         cls: "knobe-lens-move-help",
-        text: "Changed since it was sealed — review the highlighted lines, then comment and reseal.",
-        attr: { id: helpId },
-      });
-    } else if (!filed) {
-      // 🔍 Not yet saved by the user — collect their thoughts and seal.
-      const policy = trustToFilePolicy(row.result.state);
-      const btn = this.iconTextButton(td, ["search"], "Make Comment and Reseal",
-        `knobe-lens-action-button is-${policy.tone} knobe-lens-card-action`);
-      if (!row.payloadHash) {
-        btn.setAttr("disabled", "true");
-        btn.setAttr("aria-describedby", helpId);
-      } else {
-        btn.onclick = () => this.requestCommentReseal(row, policy);
-      }
-      td.createEl("div", {
-        cls: "knobe-lens-move-help",
-        text: row.payloadHash
-          ? "Add your thoughts and reseal to confirm this object, then file it."
-          : "Unreadable objects cannot be resealed.",
+        text: "Add your thoughts and seal them into this object's history.",
         attr: { id: helpId },
       });
     } else {
-      // Filed but the seal is broken/unreadable — route to the Break inspector.
-      td.createEl("div", {
-        cls: "knobe-lens-move-help",
-        text: "Seal broken — open this object to inspect and repair it.",
-        attr: { id: helpId },
-      });
+      // Body modified / failed / unreadable — review before it can be verified.
+      const tone = state === "failed" ? "reject" : state === "verified-body-modified" ? "promote" : "muted";
+      const icons =
+        state === "verified-body-modified" ? ["alert-triangle", "search"] :
+        state === "failed" ? ["shield-x", "search"] :
+        ["help-circle", "search"];
+      const btn = this.iconTextButton(td, icons, "Review Before Verifying",
+        `knobe-lens-action-button is-${tone} knobe-lens-card-action`);
+      if (state === "verified-body-modified" && row.payloadHash) {
+        // Edited since sealing (e.g. by an AI tool): open the note with the
+        // changed lines highlighted, then comment & reseal from the detail pane.
+        btn.setAttr("aria-label",
+          `Review "${row.title}" — it changed since sealing; open it with the changes highlighted, then comment and reseal`);
+        btn.onclick = async () => {
+          await this.select(row);
+          await this.plugin.openWithEditedHighlights(row.file);
+        };
+        td.createEl("div", {
+          cls: "knobe-lens-move-help",
+          text: "Changed since it was sealed — review the highlighted lines, then comment and reseal.",
+          attr: { id: helpId },
+        });
+      } else {
+        // Failed or unreadable: open the detail / break inspector to review.
+        const why = state === "failed"
+          ? "The seal is broken — inspect it before verifying."
+          : "Unreadable object — it cannot be sealed until it can be read.";
+        btn.setAttr("aria-label", `Review "${row.title}" before verifying — ${why}`);
+        btn.onclick = () => void this.select(row);
+        td.createEl("div", { cls: "knobe-lens-move-help", text: why, attr: { id: helpId } });
+      }
     }
 
     /* ---- the move select ---- */
