@@ -4,6 +4,21 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-07-04
+
+### Changed
+
+- **Conformance drift-guard for the bundled test vectors.** Added a test suite
+  (`test/vector-sync.test.ts`) that locks this plugin's nine bundled conformance
+  vectors to the upstream [KNOBE Protocol](https://github.com/KnobeOne/knobe-protocol)
+  repository: it byte-compares each bundled vector against a clone, confirms the
+  set is complete (no missing or extra vectors), and re-runs `verify()` against the
+  upstream files directly to reproduce the nine official verdicts. Point it at a
+  clone with the `KNOBE_PROTOCOL_DIR` environment variable; when no clone is present
+  (e.g. in isolated CI) the whole block skips cleanly. This makes the plugin's
+  canonical compatibility with KNOBE Protocol v1 continuously provable rather than a
+  point-in-time claim. No runtime or verification behavior changed.
+
 ## [0.9.1] - 2026-07-02
 
 ### Changed
