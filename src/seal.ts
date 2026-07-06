@@ -7,7 +7,7 @@
  * verify. Gated by round-trip + idempotency tests (test/seal.test.ts).
  */
 
-import { payloadHashOf, bodyHashOf, KNOBE_BEGIN_B64, KNOBE_END_B64 } from "./lens-core";
+import { payloadHashOf, bodyHashOf, verify, KNOBE_BEGIN_B64, KNOBE_END_B64 } from "./lens-core";
 
 /** One entry in a note's reseal history. Written into the sealed payload (so it
  *  round-trips with the file and is covered by payload_hash), appended only on an
@@ -96,6 +96,20 @@ export function parentReceipt(
     relationship,
     ...(title ? { title } : {}),
   };
+}
+
+/**
+ * Fields to carry from a note's existing intact seal into a fresh seal: every
+ * non-recomputed payload field, so opaque/extension/fidelity/consent/attribution
+ * context survives a re-seal. Returns `{}` for a note with no seal, or one whose
+ * seal is not intact (verified / body-modified) — never launder a broken or
+ * tampered payload into a new seal.
+ */
+export async function carriedFields(raw: string): Promise<Partial<SealFields>> {
+  if (!raw.includes(KNOBE_BEGIN_B64)) return {};
+  const r = await verify(raw);
+  if (r.state !== "verified" && r.state !== "verified-body-modified") return {};
+  return mergePayloadFields(r.payload ?? {}, {}) as Partial<SealFields>;
 }
 
 /** Split a note into its YAML frontmatter and body, dropping any existing seal. */

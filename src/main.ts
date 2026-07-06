@@ -6,6 +6,7 @@ import { verify, hasKnobeMarker, KNOBE_BEGIN_B64 } from "./lens-core";
 import { isFiledUnder, isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
 import {
+  carriedFields,
   mergePayloadFields,
   parentReceipt,
   sealKnobe,
@@ -13,6 +14,7 @@ import {
   SealFields,
   ResealComment,
 } from "./seal";
+import { installSaveHook } from "./save-hook";
 import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./settings";
 import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./trust";
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
@@ -185,22 +187,14 @@ export default class KnobeLensPlugin extends Plugin {
       type CommandDef = { callback?: () => unknown };
       const app = this.app as unknown as { commands?: { commands?: Record<string, CommandDef> } };
       const save = app.commands?.commands?.["editor:save-file"];
-      const original = save?.callback;
-      if (!save || typeof original !== "function") return;
-      const wrapped = (): unknown => {
-        const result = original();
-        if (this.settings.promptOnSave) {
-          const file = this.app.workspace.getActiveFile();
-          if (file && file.extension === "md") void this.openSealPrompt(file);
-        }
-        return result;
-      };
-      save.callback = wrapped;
-      // Restore only if the callback is still ours — another plugin may have
-      // wrapped it after us, and blindly restoring would strip its wrapper.
-      this.restoreSaveCommand = () => {
-        if (save.callback === wrapped) save.callback = original;
-      };
+      // installSaveHook wraps the native save and returns an identity-checked
+      // restorer (null if there is no callable command — then only the palette
+      // command / a user hotkey reaches the prompt).
+      this.restoreSaveCommand = installSaveHook(save, () => {
+        if (!this.settings.promptOnSave) return;
+        const file = this.app.workspace.getActiveFile();
+        if (file && file.extension === "md") void this.openSealPrompt(file);
+      });
     } catch (e) {
       console.error("[knobe-lens] could not hook the save command:", e);
     }
@@ -277,19 +271,9 @@ export default class KnobeLensPlugin extends Plugin {
 
   private async buildSealed(file: TFile, raw: string, overrides: Partial<SealFields> = {}): Promise<string> {
     const { frontmatter, body } = splitNote(raw);
-    const carried = await this.carriedFields(raw);
+    const carried = await carriedFields(raw);
     const merged = mergePayloadFields(carried as Record<string, unknown>, overrides);
     return this.buildSealedParts(file, frontmatter, body, merged as Partial<SealFields>);
-  }
-
-  /** Carry every non-computed field from an intact payload. This is both the
-   *  protocol's opaque-field preservation rule and protection against shedding
-   *  fidelity, consent, accessibility, or attribution context on re-seal. */
-  private async carriedFields(raw: string): Promise<Partial<SealFields>> {
-    if (!raw.includes(KNOBE_BEGIN_B64)) return {};
-    const r = await verify(raw);
-    if (r.state !== "verified" && r.state !== "verified-body-modified") return {};
-    return mergePayloadFields(r.payload ?? {}, {}) as Partial<SealFields>;
   }
 
   private async buildSealedParts(
@@ -558,7 +542,7 @@ export default class KnobeLensPlugin extends Plugin {
       }
       const { frontmatter } = splitNote(raw);
       // Restoring the body must not shed the payload-only fields.
-      const carried = await this.carriedFields(raw);
+      const carried = await carriedFields(raw);
       const sealed = await this.buildSealedParts(file, frontmatter, snap, carried);
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
       new Notice("Restored body from the embedded snapshot.");

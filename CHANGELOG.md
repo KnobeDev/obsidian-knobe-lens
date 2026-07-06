@@ -6,6 +6,21 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Extracted the native-save hook (`src/save-hook.ts`) and the re-seal
+  field-carry logic (`carriedFields`, now in `src/seal.ts`) out of `main.ts`
+  into pure, unit-tested modules — no behavior change. The save hook now also
+  guards against an `afterSave` error ever breaking the native save it wraps.
+
+### Tests
+
+- Added `test/save-hook.test.ts` and `test/carried-fields.test.ts` covering the
+  save-command wrap and identity-checked restore (won't strip a later plugin's
+  wrapper) and the carry-forward rules: an intact seal carries opaque/extension
+  fields; a note with no seal, a failed seal, or an unreadable seal carries
+  nothing (never launders a tampered payload). Suite: 160 → 171.
+
 ## [0.10.2] - 2026-07-06
 
 ### Fixed
