@@ -37,7 +37,7 @@ export interface SealFields {
    *  Advisory by protocol posture — never absolute. Omitted when blank. */
   instructions?: string;
   /** Append-only log of reseal comments, carried inside the sealed payload. */
-  reseal_log?: ResealComment[];
+  reseal_log?: unknown[];
   [k: string]: unknown;
 }
 
@@ -46,6 +46,57 @@ const END = KNOBE_END_B64;
 // Strip a trailing payload block (and any blank lines before it) when re-sealing.
 // `[\r\n]*` tolerates CRLF blank lines so a CRLF note re-seals cleanly.
 const BLOCK_STRIP = /[\r\n]*-----BEGIN KNOBE B64-----(?:(?!-----BEGIN KNOBE B64-----)[\s\S])*?-----END KNOBE B64-----\s*$/;
+const RECOMPUTED_FIELDS = new Set(["spec_version", "payload_hash", "body_hash", "ext_body_snapshot"]);
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+
+/**
+ * Carry an intact payload into a new seal without shedding optional or extension
+ * fields. Hash fields and the plugin-managed body snapshot are recomputed by the
+ * sealer. Attribution overrides update matching sources while preserving source
+ * metadata and additional contributors.
+ */
+export function mergePayloadFields(
+  existing: Record<string, unknown>,
+  overrides: Partial<SealFields>,
+): Record<string, unknown> {
+  const carried: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(existing)) {
+    if (!RECOMPUTED_FIELDS.has(key)) carried[key] = value;
+  }
+
+  const merged: Record<string, unknown> = { ...carried, ...overrides };
+  const oldAttribution = record(carried.attribution);
+  const newAttribution = record(overrides.attribution);
+  const oldSources = oldAttribution && Array.isArray(oldAttribution.sources) ? oldAttribution.sources : null;
+  const newSources = newAttribution && Array.isArray(newAttribution.sources) ? newAttribution.sources : null;
+  if (oldAttribution && newAttribution && oldSources && newSources) {
+    const sources = oldSources.slice();
+    for (let i = 0; i < newSources.length; i++) {
+      const oldSource = record(oldSources[i]);
+      const newSource = record(newSources[i]);
+      sources[i] = oldSource && newSource ? { ...oldSource, ...newSource } : newSources[i];
+    }
+    merged.attribution = { ...oldAttribution, ...newAttribution, sources };
+  }
+  return merged;
+}
+
+/** Create a protocol-shaped lineage receipt. */
+export function parentReceipt(
+  payloadHash: string,
+  relationship: string,
+  title?: string,
+): Record<string, string> {
+  return {
+    payload_hash: payloadHash,
+    relationship,
+    ...(title ? { title } : {}),
+  };
+}
 
 /** Split a note into its YAML frontmatter and body, dropping any existing seal. */
 export function splitNote(raw: string): { frontmatter: string; body: string } {

@@ -4,6 +4,22 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Reject payloads declaring unsupported `spec_version` values instead of
+  verifying them under guessed v1 semantics.
+- Preserve all intact protocol context, attribution metadata, and opaque
+  extension fields when resealing; computed hash and snapshot fields remain
+  sealer-managed.
+- Escape control characters and Markdown syntax from untrusted payload data in
+  generated verification reports.
+- Require the canonical nine-vector and ten-vector adversarial suites in pull
+  request and release CI.
+- Report frontmatter without its required `spec_version` as nonconforming and
+  emit protocol-shaped `parents[].relationship` lineage receipts.
+
 ## [0.10.1] - 2026-07-06
 
 ### Fixed

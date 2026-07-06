@@ -32,13 +32,9 @@ export interface LensResult {
   reason: string | null;
 }
 
-// The only finalized KNOBE spec version. Per the protocol authors, present
-// non-1.0 labels (2.9, 3.0, …) are premature: the on-disk format is 1.0, so
-// every object is verified under 1.0 rules regardless of its declared version.
-// This is safe against false positives — a genuinely different canonicalization
-// produces a mismatched hash ("failed"), never a spurious "verified". Non-1.0
-// labels are surfaced as a conformance warning so the normalization is visible.
-const FINALIZED_SPEC_VERSION = "1.0";
+// A v1 lens must not guess how another protocol version is canonicalized or
+// interpreted. Version gating happens before hashing, matching reference lens.py.
+const SUPPORTED_SPEC_VERSIONS = new Set<unknown>(["1.0"]);
 
 export const REQUIRED = ["spec_version", "title", "summary", "content_type", "created_date",
   "license", "privacy_level", "quarantine_status", "attribution", "payload_hash"];
@@ -295,7 +291,11 @@ function parseFrontmatter(raw: string): { ok: boolean; spec: string | null; reas
   let spec: string | null = null;
   for (let k = 1; k < lines.length; k++) {
     const ln = lines[k].replace(/\r$/, "");
-    if (ln === "---") return { ok: true, spec, reason: null };
+    if (ln === "---") {
+      return spec === null
+        ? { ok: false, spec: null, reason: "missing required spec_version" }
+        : { ok: true, spec, reason: null };
+    }
     const m = ln.match(/^\s*spec_version\s*:\s*(.+?)\s*$/);
     if (m && spec === null) spec = m[1].trim().replace(/^["']/, "").replace(/["']$/, "");
   }
@@ -345,14 +345,13 @@ function checkConformance(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (!fmOk) errors.push(`YAML frontmatter missing or malformed: ${fmReason}`);
+  if (!fmOk) {
+    errors.push(fmReason === "missing required spec_version"
+      ? "YAML frontmatter missing required spec_version"
+      : `YAML frontmatter missing or malformed: ${fmReason}`);
+  }
   else if (fmSpec !== null && typeof payload.spec_version === "string" && fmSpec !== payload.spec_version) {
     warnings.push(`frontmatter spec_version '${fmSpec}' does not match sealed payload spec_version '${payload.spec_version}'`);
-  }
-
-  const sv = payload.spec_version;
-  if (typeof sv === "string" && sv !== FINALIZED_SPEC_VERSION) {
-    warnings.push(`spec_version '${sv}' is not a finalized KNOBE version; verified under ${FINALIZED_SPEC_VERSION} rules`);
   }
 
   for (const mm of missing) errors.push(`required field missing: ${mm}`);
@@ -597,6 +596,11 @@ export async function verify(raw: string): Promise<LensResult> {
   }
 
   if (findNfcCollisions(payload).length) return unreadable("payload keys collide under NFC normalization", blocks.length, payload);
+
+  const specVersion = payload.spec_version;
+  if (specVersion !== undefined && !SUPPORTED_SPEC_VERSIONS.has(specVersion)) {
+    return unreadable(`unsupported spec_version: ${String(specVersion)} (this verifier supports ['1.0'])`, blocks.length, payload);
+  }
 
   const stored = typeof payload.payload_hash === "string" ? payload.payload_hash : "";
   const computed = await payloadHashOf(payload);

@@ -98,7 +98,7 @@ export const PROTOCOL_REFERENCE: RefSection[] = [
     heading: "Conformance",
     terms: [
       { term: "Valid", def: "Every required field is present and well-formed." },
-      { term: "Warnings", def: "Verifies, but something is non-canonical (e.g. an unexpected spec_version label)." },
+      { term: "Warnings", def: "Verifies, but something is non-canonical (e.g. multiple payload blocks or an unnamespaced custom vocabulary value)." },
       { term: "Invalid", def: "A required field is missing or malformed." },
     ],
   },

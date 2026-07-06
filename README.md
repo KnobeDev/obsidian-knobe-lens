@@ -68,10 +68,15 @@ cd obsidian-knobe-lens && npm install && npm run build
 
 ```bash
 npm install
-npm test        # vitest: 73 tests (verifier vectors, sealer, trust, boards, diagnosis, diff, lineage, security)
+npm test        # vitest: verifier vectors, sealer, trust, boards, diagnosis, diff, lineage, security
 npm run dev     # esbuild watch
 npm run build   # tsc type-check + production bundle -> main.js
 ```
+
+The conformance suite requires a sibling clone at `../knobe-protocol`, or set
+`KNOBE_PROTOCOL_DIR` to a protocol repository/test-vectors directory. CI checks
+out the canonical repository automatically; the suite fails instead of silently
+skipping protocol drift checks when it is unavailable.
 
 Source is organized as small modules: `lens-core` (verify + hashing primitives), `seal`, `scanner`, `trust`, `diagnose`, `diff`, `lineage` (+ `lineage-render`), `view`, `settings`, `main`.
 

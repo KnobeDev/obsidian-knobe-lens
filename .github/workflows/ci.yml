@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      KNOBE_PROTOCOL_DIR: ${{ github.workspace }}/.upstream/knobe-protocol
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out canonical KNOBE protocol vectors
+        uses: actions/checkout@v4
+        with:
+          repository: KnobeOne/knobe-protocol
+          path: .upstream/knobe-protocol
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

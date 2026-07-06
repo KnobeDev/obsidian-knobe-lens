@@ -5,3 +5,4 @@ main.js.map
 data.json
 .DS_Store
 gemma-review/
+.upstream/

@@ -131,9 +131,10 @@ describe("sealer round-trips through the verifier", () => {
   });
 
   it("creates protocol-shaped parent relationship receipts", () => {
-    expect(parentReceipt("a".repeat(64), "supersedes")).toEqual({
+    expect(parentReceipt("a".repeat(64), "supersedes", "Earlier edition")).toEqual({
       payload_hash: "a".repeat(64),
       relationship: "supersedes",
+      title: "Earlier edition",
     });
   });
 });

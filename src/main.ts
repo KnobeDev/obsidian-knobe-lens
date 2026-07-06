@@ -5,7 +5,14 @@ import { changedLineNumbers } from "./diff";
 import { verify, hasKnobeMarker, KNOBE_BEGIN_B64 } from "./lens-core";
 import { isFiledUnder, isFolder, listPortfolioFolders, portfolioPath, sanitizePortfolioName, targetPathFor } from "./portfolio";
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
-import { sealKnobe, splitNote, SealFields, ResealComment } from "./seal";
+import {
+  mergePayloadFields,
+  parentReceipt,
+  sealKnobe,
+  splitNote,
+  SealFields,
+  ResealComment,
+} from "./seal";
 import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./settings";
 import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./trust";
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
@@ -22,26 +29,11 @@ import { detailsToOverrides, prefillDetails } from "./seal-details";
 import { SealDetailsModal } from "./seal-details-modal";
 
 const RESEAL_DEBOUNCE_MS = 900;
-const HEX64 = /^[0-9a-f]{64}$/;
 const SETTINGS_KEYS: (keyof KnobeLensSettings)[] = [
   "author", "contribution", "license", "contentType",
   "privacyLevel", "quarantineStatus", "defaultSummary", "defaultInstructions",
   "resealOnSave", "promptOnSave", "embedBodySnapshot", "portfolioRoot",
 ];
-
-/** Well-formed lineage parents of a payload (same filter promote/reseal use). */
-const validParents = (p: Record<string, unknown>): Record<string, unknown>[] =>
-  (Array.isArray(p.parents) ? (p.parents as unknown[]) : []).filter(
-    (q): q is Record<string, unknown> =>
-      !!q && typeof q === "object" && typeof (q as Record<string, unknown>).payload_hash === "string"
-      && HEX64.test((q as Record<string, string>).payload_hash),
-  );
-
-/** Well-formed reseal-log entries of a payload. */
-const validResealLog = (p: Record<string, unknown>): ResealComment[] =>
-  Array.isArray(p.reseal_log)
-    ? (p.reseal_log as ResealComment[]).filter((e) => e && typeof e === "object" && typeof e.comment === "string")
-    : [];
 
 /* ---- in-editor "EDITED, RECONFIRM" highlights ----------------------------
  * A CodeMirror line-decoration field. openWithEditedHighlights() dispatches
@@ -285,37 +277,19 @@ export default class KnobeLensPlugin extends Plugin {
 
   private async buildSealed(file: TFile, raw: string, overrides: Partial<SealFields> = {}): Promise<string> {
     const { frontmatter, body } = splitNote(raw);
-    const carried = await this.carriedFields(raw, overrides);
-    return this.buildSealedParts(file, frontmatter, body, { ...carried, ...overrides });
+    const carried = await this.carriedFields(raw);
+    const merged = mergePayloadFields(carried as Record<string, unknown>, overrides);
+    return this.buildSealedParts(file, frontmatter, body, merged as Partial<SealFields>);
   }
 
-  /** Payload-only fields — the instruction set, reseal history, and lineage
-   *  parents — that fieldsFor() cannot reconstruct from frontmatter/settings.
-   *  Any re-seal of an intact seal carries them forward so they survive
-   *  auto-reseal, promote, and the save prompt; a caller that puts the key in
-   *  `overrides` takes full control (the save prompt always sends
-   *  `instructions`, so clearing the field there sticks). Never carried from a
-   *  broken seal — that would launder tampered fields into a fresh one. */
-  private async carriedFields(raw: string, overrides: Partial<SealFields>): Promise<Partial<SealFields>> {
+  /** Carry every non-computed field from an intact payload. This is both the
+   *  protocol's opaque-field preservation rule and protection against shedding
+   *  fidelity, consent, accessibility, or attribution context on re-seal. */
+  private async carriedFields(raw: string): Promise<Partial<SealFields>> {
     if (!raw.includes(KNOBE_BEGIN_B64)) return {};
-    const needed = (["instructions", "reseal_log", "parents"] as const).filter((k) => !(k in overrides));
-    if (!needed.length) return {};
     const r = await verify(raw);
     if (r.state !== "verified" && r.state !== "verified-body-modified") return {};
-    const p = r.payload ?? {};
-    const carried: Partial<SealFields> = {};
-    if (needed.includes("instructions") && typeof p.instructions === "string" && p.instructions.trim()) {
-      carried.instructions = p.instructions;
-    }
-    if (needed.includes("reseal_log")) {
-      const log = validResealLog(p);
-      if (log.length) carried.reseal_log = log;
-    }
-    if (needed.includes("parents")) {
-      const parents = validParents(p);
-      if (parents.length) carried.parents = parents;
-    }
-    return carried;
+    return mergePayloadFields(r.payload ?? {}, {}) as Partial<SealFields>;
   }
 
   private async buildSealedParts(
@@ -370,8 +344,9 @@ export default class KnobeLensPlugin extends Plugin {
         return;
       }
       const oldHash = current.computed;
-      const existing = validParents(current.payload ?? {});
-      const parents = oldHash ? [...existing, { payload_hash: oldHash, relation: "promoted-from" }] : existing;
+      const existing = Array.isArray(current.payload?.parents) ? current.payload.parents : [];
+      const parentTitle = typeof current.payload?.title === "string" ? current.payload.title : undefined;
+      const parents = oldHash ? [...existing, parentReceipt(oldHash, "supersedes", parentTitle)] : existing;
       const sealed = await this.buildSealed(file, raw, { quarantine_status: "trusted", parents } as Partial<SealFields>);
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
       new Notice("Promoted to trusted — re-sealed; previous object recorded as parent.");
@@ -406,7 +381,7 @@ export default class KnobeLensPlugin extends Plugin {
 
       // Append to the existing reseal_log (append-only history), only when the
       // author actually left a comment — an empty reseal must stay byte-stable.
-      const prevLog = validResealLog(p);
+      const prevLog = Array.isArray(p.reseal_log) ? p.reseal_log : [];
       let reseal_log = prevLog;
       if (note) {
         const entry: ResealComment = { at: new Date().toISOString(), comment: note };
@@ -416,8 +391,9 @@ export default class KnobeLensPlugin extends Plugin {
       }
 
       // Preserve existing lineage parents and add a reverified-from edge (mirrors promote()).
-      const existing = validParents(p);
-      const parents = oldHash ? [...existing, { payload_hash: oldHash, relation: "reverified-from" }] : existing;
+      const existing = Array.isArray(p.parents) ? p.parents : [];
+      const parentTitle = typeof p.title === "string" ? p.title : undefined;
+      const parents = oldHash ? [...existing, parentReceipt(oldHash, "supersedes", parentTitle)] : existing;
 
       const sealed = await this.buildSealed(file, raw, { reseal_log, parents } as Partial<SealFields>);
       if (sealed === raw) {
@@ -582,7 +558,7 @@ export default class KnobeLensPlugin extends Plugin {
       }
       const { frontmatter } = splitNote(raw);
       // Restoring the body must not shed the payload-only fields.
-      const carried = await this.carriedFields(raw, {});
+      const carried = await this.carriedFields(raw);
       const sealed = await this.buildSealedParts(file, frontmatter, snap, carried);
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
       new Notice("Restored body from the embedded snapshot.");

@@ -4,9 +4,8 @@
  * silently pass here against a stale copy.
  *
  * Set KNOBE_PROTOCOL_DIR to a clone of github.com/KnobeOne/knobe-protocol (either the
- * repo root or its test-vectors/ dir). Defaults to the local HarnessConsole clone. When
- * no clone is present (e.g. plugin CI in isolation), the whole block skips — exactly like
- * the reference-parity skip in Second Brain's suite. When a clone IS present, this proves
+ * repo root or its test-vectors/ dir). The test fails clearly when no clone is
+ * available; CI checks out the canonical repository before running it. This proves
  * three things at once: (1) each bundled vector is byte-identical to upstream, (2) the two
  * sets are complete (no missing/extra), and (3) this plugin's verify() reproduces the nine
  * official verdicts on the UPSTREAM files directly — not just on its own bundled copy.
@@ -63,8 +62,14 @@ function resolveUpstream(): string | null {
 }
 
 const UPSTREAM = resolveUpstream();
+if (!UPSTREAM) {
+  throw new Error(
+    "KNOBE protocol vectors not found. Clone KnobeOne/knobe-protocol beside this repo "
+    + "or set KNOBE_PROTOCOL_DIR to its root/test-vectors directory.",
+  );
+}
 
-describe.skipIf(!UPSTREAM)(
+describe(
   "bundled conformance vectors stay in sync with upstream knobe-protocol",
   () => {
     it("upstream ships exactly the nine vectors we lock against (no drift in the set)", () => {
