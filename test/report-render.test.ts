@@ -62,4 +62,33 @@ describe("buildReportMarkdown", () => {
     expect(md).toContain("- required field missing: title");
     expect(md).toContain("**rejected** — tampered");
   });
+
+  it("renders hostile payload strings as inert single-line text", () => {
+    const hostile: LensResult = {
+      ...verified,
+      payload: {
+        ...verified.payload,
+        title: "ALERT\u001b[31m\n## SPOOFED | ![[Private note]]",
+        attribution: {
+          sources: [{ author: "Mallory\n- **verified**", contribution: "source|owner" }],
+        },
+      },
+      conformanceIssues: ["custom value\n## forged section"],
+    };
+    const md = buildReportMarkdown({
+      file: { basename: "Hostile", path: "Hostile.knobe.md" },
+      result: hostile,
+      verdict: { verdict: "rejected", note: "review\n![[Secret]]", at: "2026-06-29T00:00:00Z" },
+      generatedAt: "2026-06-29T12:00:00.000Z",
+    });
+
+    expect(md).not.toContain("\u001b");
+    expect(md).not.toContain("\n## SPOOFED");
+    expect(md).not.toContain("![[Private note]]");
+    expect(md).not.toContain("\n- **verified**");
+    expect(md).not.toContain("\n## forged section");
+    expect(md).not.toContain("\n![[Secret]]");
+    expect(md).toContain("\\x1b");
+    expect(md).toContain("\\!\\[\\[Private note\\]\\]");
+  });
 });

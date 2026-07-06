@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sealKnobe, splitNote, SealFields } from "../src/seal";
+import { mergePayloadFields, parentReceipt, sealKnobe, splitNote, SealFields } from "../src/seal";
 import { verify } from "../src/lens-core";
 
 const FM = `---\ntitle: "Round Trip"\nspec_version: "1.0"\n---`;
@@ -87,5 +87,53 @@ describe("sealer round-trips through the verifier", () => {
     expect(sealed).not.toContain("reseal_log");
     const r = await verify(sealed);
     expect(r.state).toBe("verified");
+  });
+
+  it("losslessly carries protocol context and opaque extensions through a reseal", () => {
+    const existing = {
+      ...fields(),
+      payload_hash: "a".repeat(64),
+      body_hash: "b".repeat(64),
+      fidelity_limits: { represents: "source excerpt", do_not_infer: ["completeness"] },
+      use_conditions: { consent_note: "classroom use only" },
+      accessibility: [{ adaptation_type: "simplification", review_date: "2026-07-01" }],
+      transformation_history: [{ date: "2026-07-01", strategy: "summarized" }],
+      attribution: {
+        sources: [
+          { author: "Original", contribution: "authorship", rights_bearing: true },
+          { author: "Research assistant", contribution: "fact checking" },
+        ],
+      },
+      "lab:review_state": "approved",
+    };
+
+    const merged = mergePayloadFields(existing, {
+      title: "Updated title",
+      attribution: { sources: [{ author: "Updated", contribution: "editing" }] },
+    });
+
+    expect(merged).toMatchObject({
+      title: "Updated title",
+      fidelity_limits: existing.fidelity_limits,
+      use_conditions: existing.use_conditions,
+      accessibility: existing.accessibility,
+      transformation_history: existing.transformation_history,
+      "lab:review_state": "approved",
+    });
+    expect(merged.attribution).toEqual({
+      sources: [
+        { author: "Updated", contribution: "editing", rights_bearing: true },
+        { author: "Research assistant", contribution: "fact checking" },
+      ],
+    });
+    expect(merged).not.toHaveProperty("payload_hash");
+    expect(merged).not.toHaveProperty("body_hash");
+  });
+
+  it("creates protocol-shaped parent relationship receipts", () => {
+    expect(parentReceipt("a".repeat(64), "supersedes")).toEqual({
+      payload_hash: "a".repeat(64),
+      relationship: "supersedes",
+    });
   });
 });

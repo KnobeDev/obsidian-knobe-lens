@@ -30,6 +30,19 @@ const OFFICIAL: Record<string, { state: string; conformance: string }> = {
   "multi-block.knobe.md": { state: "verified", conformance: "warnings" },
 };
 
+const ADVERSARIAL: Record<string, { state: string; bodyVerified: string | null; conformance: string }> = {
+  "bad-attribution-sources-type.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
+  "bad-body-hash-format.knobe.md": { state: "verified-body-modified", bodyVerified: "modified", conformance: "invalid" },
+  "bad-created-date.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
+  "control-character-title.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
+  "duplicate-key.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+  "multi-block-warning.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "warnings" },
+  "nfc-key-collision.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+  "no-frontmatter-valid-payload.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
+  "payload-array.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+  "unsupported-spec-version.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+};
+
 const BUNDLED = join(process.cwd(), "test", "vectors");
 
 /** Resolve the upstream test-vectors directory from the env var (root or subdir), or the
@@ -37,6 +50,8 @@ const BUNDLED = join(process.cwd(), "test", "vectors");
 function resolveUpstream(): string | null {
   const candidates = [
     process.env.KNOBE_PROTOCOL_DIR,
+    "/home/jdhori/dev/knobe-protocol",
+    "/mnt/devdrive/knobe-protocol",
     "/mnt/devdrive/HarnessConsole/forks/knobe-protocol",
   ].filter(Boolean) as string[];
   for (const base of candidates) {
@@ -71,6 +86,16 @@ describe.skipIf(!UPSTREAM)(
         const r = await verify(raw);
         expect(r.state).toBe(OFFICIAL[name].state);
         expect(r.conformance).toBe(OFFICIAL[name].conformance);
+      });
+    }
+
+    for (const [name, expected] of Object.entries(ADVERSARIAL)) {
+      it(`adversarial/${name}: verify() matches the upstream hardening verdict`, async () => {
+        const raw = readFileSync(join(UPSTREAM as string, "adversarial", name), "utf-8");
+        const r = await verify(raw);
+        expect(r.state).toBe(expected.state);
+        expect(r.bodyVerified).toBe(expected.bodyVerified);
+        expect(r.conformance).toBe(expected.conformance);
       });
     }
   },

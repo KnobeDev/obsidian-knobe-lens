@@ -115,13 +115,21 @@ describe("recognition: surface objects this lens cannot verify", () => {
     expect(r.payload?.title).toBe("A v3 knote"); // dashboard can show the real title
   });
 
-  it("non-1.0 spec_version is verified under 1.0 rules, not rejected as unsupported", async () => {
-    // A fake payload_hash means the hash check is reached (and fails) — proving the
-    // file is no longer short-circuited to 'unreadable: unsupported spec_version'.
+  it("non-1.0 spec_version is unreadable because this v1 lens cannot infer its semantics", async () => {
     const fakeHash = "0".repeat(64);
     const r = await verify(wrap(b64(`{"spec_version":"3.0","title":"x","payload_hash":"${fakeHash}"}`)));
-    expect(r.state).toBe("failed"); // reached hash verification, not version-gated
-    expect(r.conformanceIssues.some((i) => i.includes("not a finalized KNOBE version"))).toBe(true);
+    expect(r.state).toBe("unreadable");
+    expect(r.computed).toBeNull();
+    expect(r.reason).toContain("unsupported spec_version");
+  });
+
+  it("frontmatter without spec_version is nonconforming even when the payload verifies", async () => {
+    const raw = readFileSync(join(VEC, "minimal-valid.knobe.md"), "utf-8")
+      .replace(/^spec_version:.*\n/m, "");
+    const r = await verify(raw);
+    expect(r.state).toBe("verified");
+    expect(r.conformance).toBe("invalid");
+    expect(r.conformanceIssues).toContain("YAML frontmatter missing required spec_version");
   });
 });
 
