@@ -1,16 +1,16 @@
 {
   "name": "knobe-lens",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Verify and inspect KNOBE Protocol v1 knowledge objects in your Obsidian vault.",
   "main": "main.js",
   "author": "Joshua Hori (https://github.com/jdhori)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jdhori/obsidian-knobe-lens.git"
+    "url": "https://github.com/PersonalProjects/obsidian-knobe-lens.git"
   },
   "bugs": {
-    "url": "https://github.com/jdhori/obsidian-knobe-lens/issues"
+    "url": "https://github.com/PersonalProjects/obsidian-knobe-lens/issues"
   },
   "scripts": {
     "dev": "node esbuild.config.mjs",

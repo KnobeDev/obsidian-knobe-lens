@@ -24,7 +24,7 @@ A KNOBE is **any Markdown note carrying a seal block** (`-----BEGIN KNOBE B64---
 ### Via BRAT (recommended)
 
 1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin.
-2. BRAT → **Add beta plugin** → `https://github.com/jdhori/obsidian-knobe-lens`.
+2. BRAT → **Add beta plugin** → `https://github.com/PersonalProjects/obsidian-knobe-lens`.
 3. Enable **KNOBE Lens** under Settings → Community plugins.
 
 BRAT installs the latest GitHub release and keeps it updated.
@@ -32,13 +32,13 @@ BRAT installs the latest GitHub release and keeps it updated.
 ### Manual
 
 Download `main.js`, `manifest.json`, and `styles.css` from the
-[latest release](https://github.com/jdhori/obsidian-knobe-lens/releases/latest)
+[latest release](https://github.com/PersonalProjects/obsidian-knobe-lens/releases/latest)
 into `<vault>/.obsidian/plugins/knobe-lens/`, then enable the plugin.
 
 ### From source
 
 ```bash
-git clone https://github.com/jdhori/obsidian-knobe-lens
+git clone https://github.com/PersonalProjects/obsidian-knobe-lens
 cd obsidian-knobe-lens && npm install && npm run build
 # copy main.js, manifest.json, styles.css into <vault>/.obsidian/plugins/knobe-lens/
 ```
