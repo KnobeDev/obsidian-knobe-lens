@@ -4,6 +4,63 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-07-04
+
+### Added
+
+- **Save with KNOBE (Ctrl/Cmd+S).** Saving a Markdown note now opens a
+  details prompt — prefilled from your sealing defaults, the note's
+  frontmatter, or its existing seal — with every field editable before the
+  seal is written into the document: title, summary, author, contribution,
+  license, content type, privacy level, quarantine status, and a new
+  **instruction set**. Skip saves without sealing; a "Save behavior" toggle
+  (on by default) disables the prompt entirely. Also available from the
+  command palette as **Save with KNOBE details…**.
+- **Instruction set (`instructions`).** A plain-language, advisory-by-protocol
+  instruction set for AI/readers can now be sealed into the payload. A new
+  "Default instruction set" setting prefills the save prompt; clearing the
+  field in the prompt removes it from the next seal. Blank instructions are
+  never sealed.
+- **Knowledge world — a 3D globe of your vault's KNOBEs.** A new dashboard
+  section renders every sealed object as a node on a rotating globe: objects
+  cluster into "continents" you can regroup by **Kind** (`content_type`),
+  **Recognition** (verified / body-modified / failed / unreadable), or
+  **Portfolio**, and adaptation lineage (`parents[]`) flies across the world as
+  great-circle arcs. Drag to rotate, scroll to zoom, pause the idle spin, or
+  reset the view. Ported from Second Brain's memory map; the 3D math is a
+  dependency-free, unit-tested module (`src/world.ts`).
+  - **Accessible by construction.** The canvas is `role="img"` with a
+    live-updated summary; the real interactive substrate is a keyboard-navigable
+    list mirror grouped by continent. Selecting an object rotates the globe to
+    face it and opens its detail. The "Group by" control is an ARIA radiogroup
+    with arrow-key navigation. Selection fires on the pointer up-event only
+    (SC 2.5.2). Under `prefers-reduced-motion` the globe is static — no idle
+    spin. Referenced-but-absent lineage parents appear as plain text rows, never
+    dead focus stops.
+- **Insert an example KNOBE.** A new command (and an empty-state call to action)
+  drops real, verifiable KNOBE Protocol v1 example documents into a
+  `KNOBE Examples/` folder so you can watch sealing, verification, and lineage
+  work immediately. The bundled set includes a linked source → agent-synthesis
+  pair whose parent link draws a live arc on the Knowledge world.
+- **KNOBE Protocol reference (in-app).** A new command and a **Protocol guide**
+  header button open a plain-language reference: the three verdicts, recognition
+  states, conformance levels, the content-kind / privacy / quarantine
+  vocabularies (generated from the verifier so they can't drift), the ten
+  required fields, honest limits, and links to knobe.org.
+
+### Changed
+
+- Empty-state onboarding now offers one-click paths to insert an example or read
+  the protocol reference.
+
+### Fixed
+
+- Re-sealing an intact KNOBE (auto-reseal on save, **Seal current note**,
+  promote, or the new save prompt) no longer silently drops payload-only
+  fields: the instruction set, the append-only `reseal_log`, and lineage
+  `parents[]` are carried forward. Nothing is ever carried from a broken
+  seal.
+
 ## [0.9.2] - 2026-07-04
 
 ### Changed

@@ -33,6 +33,9 @@ export interface SealFields {
   privacy_level: string;
   quarantine_status: string;
   attribution: { sources: Array<Record<string, unknown>> };
+  /** Plain-language instruction set for AI/readers, sealed into the payload.
+   *  Advisory by protocol posture — never absolute. Omitted when blank. */
+  instructions?: string;
   /** Append-only log of reseal comments, carried inside the sealed payload. */
   reseal_log?: ResealComment[];
   [k: string]: unknown;
@@ -80,6 +83,11 @@ export async function sealKnobe(
 ): Promise<string> {
   const trimmedBody = body.trim();
   const payload: Record<string, unknown> = { spec_version: "1.0", ...fields };
+  // Blank/undefined instruction sets are never sealed — callers pass
+  // `instructions: undefined` to mean "removed" (see detailsToOverrides).
+  if (typeof payload.instructions !== "string" || !payload.instructions.trim()) {
+    delete payload.instructions;
+  }
   if (opts.embedBody) payload.ext_body_snapshot = trimmedBody;
   payload.body_hash = await bodyHashOf(body);
   payload.payload_hash = await payloadHashOf(payload);

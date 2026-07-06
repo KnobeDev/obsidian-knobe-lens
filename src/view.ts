@@ -9,6 +9,7 @@ import { diagnoseBreak } from "./diagnose";
 import { lineDiff } from "./diff";
 import { buildLineage } from "./lineage";
 import { renderLineage } from "./lineage-render";
+import { WorldGlobe, WorldDatum, WorldEdge, WorldRenderData } from "./world-render";
 import { getVerdict } from "./trust";
 import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
@@ -43,6 +44,9 @@ export class KnobeLensView extends ItemView {
   private rowTriggers = new Map<string, HTMLElement>();
   private recognitionEl!: HTMLElement;
   private detailEl!: HTMLElement;
+  private onboardEl!: HTMLElement;
+  private worldEl!: HTMLElement;
+  private world: WorldGlobe | null = null;
   private lineageEl!: HTMLElement;
   private portfoliosEl!: HTMLElement;
   private summaryEl!: HTMLElement;
@@ -107,12 +111,20 @@ export class KnobeLensView extends ItemView {
     report.setAttr("aria-label", "Verify a document and create a report");
     report.onclick = () => void this.plugin.verifyAndReport();
 
+    const guide = headerActions.createEl("button", {
+      cls: "knobe-lens-primary-action",
+      text: "Protocol guide",
+    });
+    guide.setAttr("aria-label", "Open the KNOBE Protocol reference");
+    guide.onclick = () => this.plugin.openProtocolReference();
+
     root.createEl("p", {
       cls: "knobe-lens-note",
       text: "A verified seal proves the payload is intact, not that it is true or safe. Inspect quarantined objects before trusting.",
     });
 
     this.summaryEl = root.createEl("p", { cls: "knobe-lens-summary", attr: { role: "status", "aria-live": "polite" } });
+    this.onboardEl = root.createDiv({ cls: "knobe-lens-onboard-wrap" });
     this.noticeEl = root.createDiv({ cls: "knobe-lens-notice" });
     this.actionStatusEl = root.createEl("p", {
       cls: "knobe-lens-action-status knobe-lens-sr-only",
@@ -132,6 +144,13 @@ export class KnobeLensView extends ItemView {
 
     this.detailEl = root.createDiv({ cls: "knobe-lens-detail", attr: { role: "region", tabindex: "-1", "aria-label": "Object detail" } });
 
+    root.createEl("h4", { text: "Knowledge world" });
+    root.createEl("p", {
+      cls: "knobe-lens-note",
+      text: "Every sealed object as a 3D globe: continents group by kind, recognition, or portfolio, and adaptation lineage arcs across the world. Drag to rotate, scroll to zoom — or use the keyboard-navigable list beneath it.",
+    });
+    this.worldEl = root.createDiv({ cls: "knobe-lens-world" });
+
     root.createEl("h4", { text: "Adaptation lineage" });
     this.lineageEl = root.createDiv({ cls: "knobe-lens-lineage" });
 
@@ -139,6 +158,10 @@ export class KnobeLensView extends ItemView {
     this.portfoliosEl = root.createDiv({ cls: "knobe-lens-portfolios" });
 
     this.registerVaultAutoRefresh();
+    // Repaint the globe with the new palette when Obsidian's theme/CSS changes.
+    // One workspace listener (auto-removed on close) instead of a per-globe
+    // MutationObserver on document.body.
+    this.registerEvent(this.app.workspace.on("css-change", () => this.world?.repaint()));
     // Defer the first scan to layout-ready. A view restored at Obsidian startup
     // can run onOpen before the vault finishes indexing, so getMarkdownFiles()
     // would miss documents added while the app was closed — and no vault event
@@ -224,7 +247,9 @@ export class KnobeLensView extends ItemView {
     if (dirty) await this.plugin.persist();
 
     this.renderSummary();
+    this.renderOnboarding();
     this.renderRecognitionBoard();
+    this.renderWorld();
     this.renderLineage();
     this.renderPortfolios();
 
@@ -300,6 +325,23 @@ export class KnobeLensView extends ItemView {
         `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined` +
         (filed ? ` · ${filed} filed` : ""),
     );
+  }
+
+  /** Empty-state onboarding: when the vault has no sealed objects yet, offer a
+   *  one-click path to insert a real example or read the protocol reference. */
+  private renderOnboarding(): void {
+    this.onboardEl.empty();
+    if (this.rows.length > 0) return;
+    const box = this.onboardEl.createDiv({ cls: "knobe-lens-onboard" });
+    box.createEl("p", {
+      cls: "knobe-lens-onboard-text",
+      text: "New to KNOBE? Insert a real, verifiable example document to watch sealing, verification, and lineage come to life — or read the protocol reference.",
+    });
+    const actions = box.createDiv({ cls: "knobe-lens-actions" });
+    const insert = actions.createEl("button", { cls: "knobe-lens-primary-action", text: "Insert an example KNOBE" });
+    insert.onclick = () => this.plugin.openExamplePicker();
+    const guide = actions.createEl("button", { text: "Protocol reference" });
+    guide.onclick = () => this.plugin.openProtocolReference();
   }
 
   private renderRecognitionBoard(): void {
@@ -692,6 +734,64 @@ export class KnobeLensView extends ItemView {
     badge.createSpan({ text: "Saved & verified" });
   }
 
+  /** Build the globe dataset from the scanned rows: every sealed object is a
+   *  node, adaptation lineage supplies the arcs, and each node carries the
+   *  fields the globe needs to re-cluster by kind / recognition / portfolio.
+   *  Reuses buildLineage so the world and the flat lineage chart never diverge. */
+  private buildWorldData(): WorldRenderData {
+    const graph = buildLineage(
+      this.rows.map((r) => ({
+        hash: r.payloadHash,
+        title: r.title,
+        state: r.result.state,
+        contentType: r.contentType,
+        parents: r.parents,
+      })),
+    );
+    const degree = new Map<string, number>();
+    for (const e of graph.edges) {
+      degree.set(e.from, (degree.get(e.from) ?? 0) + 1);
+      degree.set(e.to, (degree.get(e.to) ?? 0) + 1);
+    }
+    const rowByHash = new Map<string, ScanRow>();
+    for (const r of this.rows) if (r.payloadHash) rowByHash.set(r.payloadHash, r);
+
+    const nodes: WorldDatum[] = graph.nodes.map((n) => {
+      const row = rowByHash.get(n.hash);
+      const filed = row ? this.isFiled(row) : false;
+      return {
+        hash: n.hash,
+        title: n.title,
+        state: n.state,
+        contentType: n.contentType,
+        present: n.present,
+        path: row?.file.path ?? null,
+        portfolio: filed ? row?.file.parent?.name ?? "Portfolio" : null,
+        degree: degree.get(n.hash) ?? 0,
+      };
+    });
+    const edges: WorldEdge[] = graph.edges.map((e) => ({ from: e.from, to: e.to }));
+    return { nodes, edges };
+  }
+
+  /** Create the globe once (so its listeners/observers persist across rescans),
+   *  then feed it the current dataset and reflect any active selection. */
+  private renderWorld(): void {
+    if (!this.world) {
+      this.world = new WorldGlobe(this.worldEl, {
+        groupBy: "kind",
+        onSelect: (d: WorldDatum) => {
+          if (!d.path) return; // external placeholder: nothing to open
+          const row = this.rows.find((r) => r.file.path === d.path);
+          if (row) void this.select(row);
+        },
+      });
+    }
+    this.world.render(this.buildWorldData());
+    const sel = this.rows.find((r) => r.file.path === this.selectedPath);
+    this.world.setSelected(sel?.payloadHash ?? null);
+  }
+
   private renderLineage(): void {
     const graph = buildLineage(
       this.rows.map((r) => ({
@@ -720,6 +820,7 @@ export class KnobeLensView extends ItemView {
   private async select(row: ScanRow): Promise<void> {
     this.selectedPath = row.file.path;
     this.updateRowSelection(); // no full rebuild — preserves focus
+    this.world?.setSelected(row.payloadHash ?? null); // mirror the highlight on the globe
     await this.renderDetail(row);
     this.detailEl.setAttr("aria-label", `Detail: ${row.title}`);
     this.detailEl.focus(); // tabindex=-1: programmatic focus + announce, no double-scroll
@@ -748,6 +849,7 @@ export class KnobeLensView extends ItemView {
       const restoreFocus = this.rowTriggers.get(row.file.path);
       this.selectedPath = null;
       this.updateRowSelection();
+      this.world?.setSelected(null);
       d.empty();
       this.setActionStatus(`Cleared verification details for "${row.title}".`);
       restoreFocus?.focus();
@@ -1010,6 +1112,8 @@ export class KnobeLensView extends ItemView {
   async onClose(): Promise<void> {
     this.mounted = false;
     this.destroyPortfolioSortables();
+    this.world?.destroy();
+    this.world = null;
   }
 }
 

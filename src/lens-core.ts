@@ -40,13 +40,13 @@ export interface LensResult {
 // labels are surfaced as a conformance warning so the normalization is visible.
 const FINALIZED_SPEC_VERSION = "1.0";
 
-const REQUIRED = ["spec_version", "title", "summary", "content_type", "created_date",
+export const REQUIRED = ["spec_version", "title", "summary", "content_type", "created_date",
   "license", "privacy_level", "quarantine_status", "attribution", "payload_hash"];
 
 const STRING_FIELDS = ["spec_version", "title", "summary", "content_type", "created_date",
   "license", "privacy_level", "quarantine_status"];
 
-const CANONICAL_VOCAB: Record<string, Set<string>> = {
+export const CANONICAL_VOCAB: Record<string, Set<string>> = {
   content_type: new Set(["original", "synthesis", "adaptation", "compression",
     "annotation", "seed", "collection", "translation"]),
   quarantine_status: new Set(["quarantine", "trusted", "rejected"]),

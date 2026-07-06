@@ -15,14 +15,33 @@ import {
   portfolioColor,
   PortfolioColors,
 } from "./board-interactions";
+import { KnobeExample } from "./examples";
+import { ExamplePickerModal, writeExample, EXAMPLES_DIR } from "./examples-insert";
+import { ProtocolReferenceModal } from "./protocol-reference-modal";
+import { detailsToOverrides, prefillDetails } from "./seal-details";
+import { SealDetailsModal } from "./seal-details-modal";
 
 const RESEAL_DEBOUNCE_MS = 900;
 const HEX64 = /^[0-9a-f]{64}$/;
 const SETTINGS_KEYS: (keyof KnobeLensSettings)[] = [
   "author", "contribution", "license", "contentType",
-  "privacyLevel", "quarantineStatus", "defaultSummary", "resealOnSave",
-  "embedBodySnapshot", "portfolioRoot",
+  "privacyLevel", "quarantineStatus", "defaultSummary", "defaultInstructions",
+  "resealOnSave", "promptOnSave", "embedBodySnapshot", "portfolioRoot",
 ];
+
+/** Well-formed lineage parents of a payload (same filter promote/reseal use). */
+const validParents = (p: Record<string, unknown>): Record<string, unknown>[] =>
+  (Array.isArray(p.parents) ? (p.parents as unknown[]) : []).filter(
+    (q): q is Record<string, unknown> =>
+      !!q && typeof q === "object" && typeof (q as Record<string, unknown>).payload_hash === "string"
+      && HEX64.test((q as Record<string, string>).payload_hash),
+  );
+
+/** Well-formed reseal-log entries of a payload. */
+const validResealLog = (p: Record<string, unknown>): ResealComment[] =>
+  Array.isArray(p.reseal_log)
+    ? (p.reseal_log as ResealComment[]).filter((e) => e && typeof e === "object" && typeof e.comment === "string")
+    : [];
 
 /* ---- in-editor "EDITED, RECONFIRM" highlights ----------------------------
  * A CodeMirror line-decoration field. openWithEditedHighlights() dispatches
@@ -70,6 +89,8 @@ export default class KnobeLensPlugin extends Plugin {
   private portfolioColors: PortfolioColors = {};
   private resealTimers = new Map<string, number>();
   private statusBar: HTMLElement | null = null;
+  private sealPromptOpen = false;
+  private restoreSaveCommand: (() => void) | null = null;
 
   private static readonly STATUS_LABEL: Record<string, string> = {
     verified: "KNOBE: verified",
@@ -101,6 +122,17 @@ export default class KnobeLensPlugin extends Plugin {
       },
     });
     this.addCommand({
+      id: "save-with-knobe",
+      name: "Save with KNOBE details…",
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) void this.openSealPrompt(file);
+        return true;
+      },
+    });
+    this.patchSaveCommand();
+    this.addCommand({
       id: "verify-current",
       name: "Verify current note",
       checkCallback: (checking: boolean) => {
@@ -114,6 +146,16 @@ export default class KnobeLensPlugin extends Plugin {
       id: "verify-and-report",
       name: "Submit a document for verification (create report)",
       callback: () => void this.verifyAndReport(),
+    });
+    this.addCommand({
+      id: "insert-example",
+      name: "Insert an example KNOBE document",
+      callback: () => this.openExamplePicker(),
+    });
+    this.addCommand({
+      id: "open-protocol-reference",
+      name: "Open KNOBE Protocol reference",
+      callback: () => this.openProtocolReference(),
     });
 
     this.registerEditorExtension(editedLinesField);
@@ -134,6 +176,85 @@ export default class KnobeLensPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on("rename", (f, oldPath) => void this.renameSnapshot(oldPath, f.path)),
     );
+  }
+
+  /* ---- save-with-KNOBE prompt (Ctrl/Cmd+S) ---- */
+
+  /** Tie the KNOBE details prompt into the app's native save (Ctrl/Cmd+S and
+   *  the "Save current file" command). Obsidian exposes no public save hook, so
+   *  this wraps the `editor:save-file` command callback — the established
+   *  pattern for save-triggered plugins — and restores the original on unload.
+   *  Fails soft if the internal shape ever changes: the "Save with KNOBE
+   *  details…" palette command still works, and a hotkey can be bound to it. */
+  private patchSaveCommand(): void {
+    try {
+      type CommandDef = { callback?: () => unknown };
+      const app = this.app as unknown as { commands?: { commands?: Record<string, CommandDef> } };
+      const save = app.commands?.commands?.["editor:save-file"];
+      const original = save?.callback;
+      if (!save || typeof original !== "function") return;
+      const wrapped = (): unknown => {
+        const result = original();
+        if (this.settings.promptOnSave) {
+          const file = this.app.workspace.getActiveFile();
+          if (file && file.extension === "md") void this.openSealPrompt(file);
+        }
+        return result;
+      };
+      save.callback = wrapped;
+      // Restore only if the callback is still ours — another plugin may have
+      // wrapped it after us, and blindly restoring would strip its wrapper.
+      this.restoreSaveCommand = () => {
+        if (save.callback === wrapped) save.callback = original;
+      };
+    } catch (e) {
+      console.error("[knobe-lens] could not hook the save command:", e);
+    }
+  }
+
+  /** Prompt for KNOBE details — prefilled from settings/frontmatter, or from
+   *  the note's existing seal — and seal the result straight into the note. */
+  async openSealPrompt(file: TFile): Promise<void> {
+    if (this.sealPromptOpen) return; // a held-down Ctrl+S must not stack prompts
+    try {
+      const raw = await this.app.vault.read(file);
+      if (this.isForeignKnobe(raw)) {
+        new Notice("This note is a KNOBE.AI 0.1 object; KNOBE Lens seals the PEM/B64 format. Re-sealing would corrupt it.");
+        return;
+      }
+      const alreadySealed = raw.includes(KNOBE_BEGIN_B64);
+      const payload = alreadySealed ? (await verify(raw)).payload : null;
+      const initial = prefillDetails(this.settings, this.fieldsFor(file), payload);
+      this.sealPromptOpen = true;
+      new SealDetailsModal(this.app, {
+        fileName: file.basename,
+        initial,
+        alreadySealed,
+        onClosed: () => { this.sealPromptOpen = false; },
+        onSubmit: async (details) => {
+          try {
+            const overrides = detailsToOverrides(details);
+            // The debounced auto-reseal must not race the prompt's own write —
+            // its later run is an idempotent no-op on what we seal here anyway.
+            this.cancelScheduledReseal(file.path);
+            // Re-read: the note may have kept changing while the prompt was open.
+            const latest = await this.app.vault.read(file);
+            const sealed = await this.buildSealed(file, latest, overrides);
+            if (sealed !== latest) await this.app.vault.modify(file, sealed);
+            new Notice(`Sealed "${overrides.title}" as KNOBE`);
+            return null;
+          } catch (e) {
+            console.error("[knobe-lens] save-with-knobe failed:", e);
+            return "Sealing failed — see the developer console.";
+          }
+        },
+      }).open();
+    } catch (e) {
+      // Never leave the re-entrancy flag stuck, or every future Ctrl+S no-ops.
+      this.sealPromptOpen = false;
+      console.error("[knobe-lens] openSealPrompt failed:", e);
+      new Notice("Could not open the KNOBE save prompt — see the developer console.");
+    }
   }
 
   /* ---- sealing ---- */
@@ -162,7 +283,37 @@ export default class KnobeLensPlugin extends Plugin {
 
   private async buildSealed(file: TFile, raw: string, overrides: Partial<SealFields> = {}): Promise<string> {
     const { frontmatter, body } = splitNote(raw);
-    return this.buildSealedParts(file, frontmatter, body, overrides);
+    const carried = await this.carriedFields(raw, overrides);
+    return this.buildSealedParts(file, frontmatter, body, { ...carried, ...overrides });
+  }
+
+  /** Payload-only fields — the instruction set, reseal history, and lineage
+   *  parents — that fieldsFor() cannot reconstruct from frontmatter/settings.
+   *  Any re-seal of an intact seal carries them forward so they survive
+   *  auto-reseal, promote, and the save prompt; a caller that puts the key in
+   *  `overrides` takes full control (the save prompt always sends
+   *  `instructions`, so clearing the field there sticks). Never carried from a
+   *  broken seal — that would launder tampered fields into a fresh one. */
+  private async carriedFields(raw: string, overrides: Partial<SealFields>): Promise<Partial<SealFields>> {
+    if (!raw.includes(KNOBE_BEGIN_B64)) return {};
+    const needed = (["instructions", "reseal_log", "parents"] as const).filter((k) => !(k in overrides));
+    if (!needed.length) return {};
+    const r = await verify(raw);
+    if (r.state !== "verified" && r.state !== "verified-body-modified") return {};
+    const p = r.payload ?? {};
+    const carried: Partial<SealFields> = {};
+    if (needed.includes("instructions") && typeof p.instructions === "string" && p.instructions.trim()) {
+      carried.instructions = p.instructions;
+    }
+    if (needed.includes("reseal_log")) {
+      const log = validResealLog(p);
+      if (log.length) carried.reseal_log = log;
+    }
+    if (needed.includes("parents")) {
+      const parents = validParents(p);
+      if (parents.length) carried.parents = parents;
+    }
+    return carried;
   }
 
   private async buildSealedParts(
@@ -217,11 +368,7 @@ export default class KnobeLensPlugin extends Plugin {
         return;
       }
       const oldHash = current.computed;
-      const existing = (Array.isArray(current.payload?.parents) ? (current.payload!.parents as unknown[]) : []).filter(
-        (p): p is Record<string, unknown> =>
-          !!p && typeof p === "object" && typeof (p as Record<string, unknown>).payload_hash === "string"
-          && HEX64.test((p as Record<string, string>).payload_hash),
-      );
+      const existing = validParents(current.payload ?? {});
       const parents = oldHash ? [...existing, { payload_hash: oldHash, relation: "promoted-from" }] : existing;
       const sealed = await this.buildSealed(file, raw, { quarantine_status: "trusted", parents } as Partial<SealFields>);
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
@@ -257,9 +404,7 @@ export default class KnobeLensPlugin extends Plugin {
 
       // Append to the existing reseal_log (append-only history), only when the
       // author actually left a comment — an empty reseal must stay byte-stable.
-      const prevLog: ResealComment[] = Array.isArray(p.reseal_log)
-        ? (p.reseal_log as ResealComment[]).filter((e) => e && typeof e === "object" && typeof e.comment === "string")
-        : [];
+      const prevLog = validResealLog(p);
       let reseal_log = prevLog;
       if (note) {
         const entry: ResealComment = { at: new Date().toISOString(), comment: note };
@@ -269,11 +414,7 @@ export default class KnobeLensPlugin extends Plugin {
       }
 
       // Preserve existing lineage parents and add a reverified-from edge (mirrors promote()).
-      const existing = (Array.isArray(p.parents) ? (p.parents as unknown[]) : []).filter(
-        (q): q is Record<string, unknown> =>
-          !!q && typeof q === "object" && typeof (q as Record<string, unknown>).payload_hash === "string"
-          && HEX64.test((q as Record<string, string>).payload_hash),
-      );
+      const existing = validParents(p);
       const parents = oldHash ? [...existing, { payload_hash: oldHash, relation: "reverified-from" }] : existing;
 
       const sealed = await this.buildSealed(file, raw, { reseal_log, parents } as Partial<SealFields>);
@@ -334,9 +475,16 @@ export default class KnobeLensPlugin extends Plugin {
     }
   }
 
+  private cancelScheduledReseal(path: string): void {
+    const prev = this.resealTimers.get(path);
+    if (prev) {
+      window.clearTimeout(prev);
+      this.resealTimers.delete(path);
+    }
+  }
+
   private scheduleReseal(file: TFile): void {
-    const prev = this.resealTimers.get(file.path);
-    if (prev) window.clearTimeout(prev);
+    this.cancelScheduledReseal(file.path);
     const id = window.setTimeout(() => {
       this.resealTimers.delete(file.path);
       void this.resealIfKnobe(file);
@@ -430,7 +578,9 @@ export default class KnobeLensPlugin extends Plugin {
         return;
       }
       const { frontmatter } = splitNote(raw);
-      const sealed = await this.buildSealedParts(file, frontmatter, snap);
+      // Restoring the body must not shed the payload-only fields.
+      const carried = await this.carriedFields(raw, {});
+      const sealed = await this.buildSealedParts(file, frontmatter, snap, carried);
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
       new Notice("Restored body from the embedded snapshot.");
     } catch (e) {
@@ -588,6 +738,40 @@ export default class KnobeLensPlugin extends Plugin {
     new KnobePickModal(this.app, candidates, (f) => void run(f)).open();
   }
 
+  /* ---- protocol content: examples + reference ---- */
+
+  /** Open the example picker. Discoverable from the command palette and the
+   *  dashboard's empty state, so a new user can try a real KNOBE immediately. */
+  openExamplePicker(): void {
+    new ExamplePickerModal(this.app, (examples) => this.insertExamples(examples)).open();
+  }
+
+  openProtocolReference(): void {
+    new ProtocolReferenceModal(this.app).open();
+  }
+
+  /** Write the chosen bundled examples into the vault and open the first one.
+   *  The vault 'create' events drive the dashboard's own refresh. */
+  async insertExamples(examples: KnobeExample[]): Promise<void> {
+    if (!examples.length) return;
+    try {
+      let firstFile: TFile | null = null;
+      for (const ex of examples) {
+        const f = await writeExample(this.app, ex);
+        firstFile = firstFile ?? f;
+      }
+      if (firstFile) await this.app.workspace.getLeaf(true).openFile(firstFile);
+      new Notice(
+        examples.length === 1
+          ? `Inserted "${examples[0].title}" into ${EXAMPLES_DIR}/.`
+          : `Inserted ${examples.length} example KNOBEs into ${EXAMPLES_DIR}/.`,
+      );
+    } catch (e) {
+      console.error("[knobe-lens] insert example failed:", e);
+      new Notice("Could not insert the example — see the developer console.");
+    }
+  }
+
   /* ---- persistence ---- */
 
   private async loadAll(): Promise<void> {
@@ -622,5 +806,7 @@ export default class KnobeLensPlugin extends Plugin {
   onunload(): void {
     for (const id of this.resealTimers.values()) window.clearTimeout(id);
     this.resealTimers.clear();
+    this.restoreSaveCommand?.();
+    this.restoreSaveCommand = null;
   }
 }

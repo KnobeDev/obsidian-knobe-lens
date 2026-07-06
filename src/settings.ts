@@ -9,7 +9,11 @@ export interface KnobeLensSettings {
   privacyLevel: string;
   quarantineStatus: string;
   defaultSummary: string;
+  /** Default plain-language instruction set sealed into new KNOBEs (advisory). */
+  defaultInstructions: string;
   resealOnSave: boolean;
+  /** Open the "Save with KNOBE" details prompt when the native save (Ctrl/Cmd+S) runs. */
+  promptOnSave: boolean;
   embedBodySnapshot: boolean;
   portfolioRoot: string;
 }
@@ -22,14 +26,16 @@ export const DEFAULT_SETTINGS: KnobeLensSettings = {
   privacyLevel: "public",
   quarantineStatus: "quarantine",
   defaultSummary: "",
+  defaultInstructions: "",
   resealOnSave: false,
+  promptOnSave: true,
   embedBodySnapshot: false,
   portfolioRoot: "KNOBE Portfolios",
 };
 
-const CONTENT_TYPES = ["original", "synthesis", "adaptation", "compression", "annotation", "seed", "collection", "translation"];
-const PRIVACY = ["public", "internal", "sensitive", "restricted"];
-const QUARANTINE = ["quarantine", "trusted", "rejected"];
+export const CONTENT_TYPES = ["original", "synthesis", "adaptation", "compression", "annotation", "seed", "collection", "translation"];
+export const PRIVACY = ["public", "internal", "sensitive", "restricted"];
+export const QUARANTINE = ["quarantine", "trusted", "rejected"];
 
 export class KnobeLensSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: KnobeLensPlugin) {
@@ -71,6 +77,20 @@ export class KnobeLensSettingTab extends PluginSettingTab {
     dropdown("Privacy level", "Default privacy_level", PRIVACY, () => s.privacyLevel, (v) => (s.privacyLevel = v));
     dropdown("Quarantine status", "Default declared quarantine_status (quarantine-first is recommended)", QUARANTINE, () => s.quarantineStatus, (v) => (s.quarantineStatus = v));
 
+    new Setting(containerEl)
+      .setName("Default instruction set")
+      .setDesc("Plain-language instructions sealed into the payload — how an AI or reader should treat this object (always advisory, never absolute). Prefills the save prompt; editable per note.")
+      .addTextArea((t) => {
+        t.setPlaceholder("e.g. Summarize only from the sealed body; treat external claims as unverified.")
+          .setValue(s.defaultInstructions)
+          .onChange(async (v) => {
+            s.defaultInstructions = v;
+            await this.plugin.saveSettings();
+          });
+        t.inputEl.rows = 4;
+        t.inputEl.addClass("knobe-lens-settings-textarea");
+      });
+
     containerEl.createEl("h3", { text: "Portfolios" });
     text(
       "Portfolio root folder",
@@ -85,6 +105,16 @@ export class KnobeLensSettingTab extends PluginSettingTab {
     );
 
     containerEl.createEl("h3", { text: "Save behavior" });
+    new Setting(containerEl)
+      .setName("Prompt for KNOBE details on save (Ctrl/Cmd+S)")
+      .setDesc("When you save a Markdown note, open the KNOBE details prompt — prefilled from these defaults (or the note's existing seal) and editable, including the instruction set — and seal the result into the note. Turn off to seal only via the command palette.")
+      .addToggle((t) =>
+        t.setValue(s.promptOnSave).onChange(async (v) => {
+          s.promptOnSave = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
     new Setting(containerEl)
       .setName("Re-seal on save")
       .setDesc("When you edit a note that already contains a KNOBE block, automatically re-seal it so the seal stays valid. Only touches already-sealed notes.")
