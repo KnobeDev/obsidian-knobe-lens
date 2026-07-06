@@ -4,6 +4,16 @@ All notable changes to KNOBE Lens are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] - 2026-07-06
+
+### Fixed
+
+- **Save Prompt Hook:** Deferred native save command wrapping to `onLayoutReady` to fix a silent failure where the save details prompt would not trigger on Ctrl/Cmd+S saving.
+- **Cryptographic Hashing Consistency:** Computation of `body_hash` now uses `trimmedBody` to match the exact snapshot output and conform to downstream restore protocols.
+- **Race Condition & Lifecycle Guards:** Added checks for deleted/moved files during auto-reseal, guarded workspace leaf opening against null/undefined references, and implemented `mounted` lifecycle guards for dashboard refreshes.
+- **Lineage Edge Deduplication:** Deduplicated graph edges and rejected invalid empty parent nodes during lineage build operations.
+- **Settings UX & Async Error Recovery:** Standardized async error catching inside modals and added visual verification styling to the settings input.
+
 ## [0.10.0] - 2026-07-04
 
 ### Added
