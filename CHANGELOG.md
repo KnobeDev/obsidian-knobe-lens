@@ -6,6 +6,8 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-06
+
 ### Fixed
 
 - **Frontmatter edits are honored on re-seal again.** After 0.10.2's

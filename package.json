@@ -1,6 +1,6 @@
 {
   "name": "knobe-lens",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Verify and inspect KNOBE Protocol v1 knowledge objects in your Obsidian vault.",
   "main": "main.js",
   "author": "Joshua Hori (https://github.com/jdhori)",
