@@ -205,6 +205,7 @@ export class KnobeLensView extends ItemView {
    * calls coalesce into one trailing rescan.
    */
   async refresh(announce = true, deep = false): Promise<void> {
+    if (!this.mounted) return;
     if (this.refreshing) {
       this.refreshQueued = true;
       if (deep) this.refreshQueuedDeep = true; // don't lose a Rescan behind a running scan
@@ -540,11 +541,13 @@ export class KnobeLensView extends ItemView {
         new NewFolderModal(this.app, {
           onSubmit: async (name) => {
             try {
+              select.setAttr("disabled", "true");
               const path = await this.plugin.createPortfolioFolder(name);
               await this.plugin.moveToPortfolio(row.file, path);
               await this.afterMove(row, path.split("/").pop() ?? name);
               return null;
             } catch (e) {
+              select.removeAttribute("disabled");
               return errorMessage(e);
             }
           },
@@ -553,6 +556,7 @@ export class KnobeLensView extends ItemView {
       }
       // A concrete folder path.
       const folderName = select.options[select.selectedIndex]?.text ?? value;
+      select.setAttr("disabled", "true");
       void (async () => {
         try {
           await this.plugin.moveToPortfolio(row.file, value);
@@ -561,6 +565,7 @@ export class KnobeLensView extends ItemView {
         } catch (e) {
           new Notice(errorMessage(e));
           select.value = prevValue; // revert the UI; nothing moved
+          select.removeAttribute("disabled");
         }
       })();
     });
@@ -612,10 +617,12 @@ export class KnobeLensView extends ItemView {
    *  object's detail so focus never falls to <body>. The TFile is mutated in
    *  place by the rename, so row.file.path is already the new path. */
   private async afterMove(row: ScanRow, folderName: string): Promise<void> {
+    if (!this.mounted) return;
     this.setActionStatus(`Moved "${row.title}" to "${folderName}".`);
     // The rename already queued a debounced rescan; cancel it and rescan once now.
     this.scheduleRefresh.cancel();
     await this.refresh(false);
+    if (!this.mounted) return;
     const moved = this.rows.find((r) => r.file.path === row.file.path);
     if (moved) { await this.select(moved); return; }
     // The moved object left the scan scope — keep focus in the view, not on <body>.

@@ -61,6 +61,8 @@ export class NewFolderModal extends Modal {
         const problem = await this.opts.onSubmit(name);
         if (problem) { showError(problem); return; }
         this.close();
+      } catch (e) {
+        showError(e instanceof Error ? e.message : String(e));
       } finally {
         busy = false;
       }

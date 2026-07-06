@@ -44,9 +44,16 @@ export function listPortfolioFolders(root: TFolder | null): TFolder[] {
 /** The portfolio a file currently lives in (an immediate subfolder of root), or
  *  null if it is loose / outside the portfolio root. */
 export function currentPortfolioName(file: TFile, rootPath: string): string | null {
-  const parent = file.parent;
-  if (!parent || !parent.parent) return null;
-  return parent.parent.path === rootPath ? parent.name : null;
+  let folder: TFolder | null = file.parent;
+  if (!folder) return null;
+  const normalizedRoot = rootPath.endsWith("/") ? rootPath.slice(0, -1) : rootPath;
+  while (folder && folder.parent) {
+    if (folder.parent.path === normalizedRoot) {
+      return folder.name;
+    }
+    folder = folder.parent;
+  }
+  return null;
 }
 
 /** Vault path for a new portfolio folder of the given (already-sanitised) name. */
@@ -62,5 +69,7 @@ export function targetPathFor(folderPath: string, fileName: string): string {
 /** True when a file lives anywhere inside the portfolio root — i.e. it has been
  *  "filed". Filed objects move out of the main list into the Portfolios section. */
 export function isFiledUnder(filePath: string, rootPath: string): boolean {
-  return filePath.startsWith(`${rootPath}/`);
+  if (rootPath === "") return false;
+  const normalizedRoot = rootPath.endsWith("/") ? rootPath.slice(0, -1) : rootPath;
+  return filePath.startsWith(`${normalizedRoot}/`);
 }

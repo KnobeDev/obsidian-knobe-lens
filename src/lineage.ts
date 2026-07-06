@@ -35,6 +35,7 @@ export interface LineageGraph {
 export function buildLineage(items: LineageInput[]): LineageGraph {
   const nodes = new Map<string, LineageNode>();
   const edges: LineageEdge[] = [];
+  const edgeKeys = new Set<string>();
 
   for (const it of items) {
     if (it.hash) {
@@ -51,6 +52,11 @@ export function buildLineage(items: LineageInput[]): LineageGraph {
   for (const it of items) {
     if (!it.hash) continue;
     for (const parent of it.parents) {
+      if (!parent || parent.trim() === "") continue;
+      const edgeKey = `${parent}:${it.hash}`;
+      if (edgeKeys.has(edgeKey)) continue;
+      edgeKeys.add(edgeKey);
+
       if (!nodes.has(parent)) {
         nodes.set(parent, {
           hash: parent,

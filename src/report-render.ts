@@ -3,10 +3,10 @@
  * No Obsidian imports, so it is unit-testable in isolation.
  */
 
-import { LensResult } from "./lens-core";
+import { LensResult, Status } from "./lens-core";
 import { TrustEntry } from "./trust";
 
-const STATUS_LABEL: Record<string, string> = {
+const STATUS_LABEL: Record<Status, string> = {
   verified: "Verified — seal intact",
   "verified-body-modified": "Verified, body modified after sealing",
   failed: "Failed — seal does not match",
@@ -28,7 +28,7 @@ function attributionLine(payload: Record<string, unknown> | null): string {
   if (!Array.isArray(sources) || !sources.length) return "_Not declared._";
   return sources
     .map((s) => {
-      const o = (s ?? {}) as Record<string, unknown>;
+      const o = (s && typeof s === "object") ? (s as Record<string, unknown>) : {};
       const author = str(o.author) ?? "unknown";
       const contribution = str(o.contribution);
       return `- ${author}${contribution ? ` — ${contribution}` : ""}`;

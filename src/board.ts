@@ -55,7 +55,8 @@ export function groupPortfolioRows<T extends PortfolioRow>(
   rows: readonly T[],
 ): PortfolioLane<T>[] {
   return folders.map((folder) => {
-    const prefix = `${folder.path}/`;
+    const pathClean = folder.path.endsWith("/") ? folder.path.slice(0, -1) : folder.path;
+    const prefix = pathClean ? `${pathClean}/` : "";
     return {
       folder,
       rows: rows.filter((row) => row.file.path.startsWith(prefix)),

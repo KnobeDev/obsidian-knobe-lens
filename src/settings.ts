@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, debounce } from "obsidian";
 import type KnobeLensPlugin from "./main";
 
 export interface KnobeLensSettings {
@@ -38,6 +38,8 @@ export const PRIVACY = ["public", "internal", "sensitive", "restricted"];
 export const QUARANTINE = ["quarantine", "trusted", "rejected"];
 
 export class KnobeLensSettingTab extends PluginSettingTab {
+  private saveSettingsDebounced = debounce(() => void this.plugin.saveSettings(), 300, false);
+
   constructor(app: App, private plugin: KnobeLensPlugin) {
     super(app, plugin);
   }
@@ -53,9 +55,9 @@ export class KnobeLensSettingTab extends PluginSettingTab {
 
     const text = (name: string, desc: string, get: () => string, set: (v: string) => void) =>
       new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
-        t.setValue(get()).onChange(async (v) => {
+        t.setValue(get()).onChange((v) => {
           set(v);
-          await this.plugin.saveSettings();
+          this.saveSettingsDebounced();
         }),
       );
 
@@ -92,17 +94,29 @@ export class KnobeLensSettingTab extends PluginSettingTab {
       });
 
     containerEl.createEl("h3", { text: "Portfolios" });
-    text(
-      "Portfolio root folder",
-      "Vault folder that holds your portfolio subfolders. Trusted objects can be filed into these from the dashboard.",
-      () => s.portfolioRoot,
-      // Allow `/` and `\` (nested root like "Notes/Portfolios"); reject the rest
-      // of the Windows-illegal set and fall back to the default if unusable.
-      (v) => {
-        const trimmed = v.trim();
-        s.portfolioRoot = (!trimmed || /[*?"<>|]/.test(trimmed)) ? DEFAULT_SETTINGS.portfolioRoot : trimmed;
-      },
-    );
+    new Setting(containerEl)
+      .setName("Portfolio root folder")
+      .setDesc("Vault folder that holds your portfolio subfolders. Trusted objects can be filed into these from the dashboard.")
+      .addText((t) => {
+        t.setValue(s.portfolioRoot).onChange((v) => {
+          const trimmed = v.trim();
+          const invalid = !trimmed || /[*?"<>|]/.test(trimmed);
+          if (invalid) {
+            t.inputEl.addClass("is-invalid");
+            t.inputEl.style.borderColor = "var(--text-error)";
+          } else {
+            t.inputEl.removeClass("is-invalid");
+            t.inputEl.style.removeProperty("border-color");
+            s.portfolioRoot = trimmed;
+            this.saveSettingsDebounced();
+          }
+        });
+        t.inputEl.addEventListener("blur", () => {
+          t.setValue(s.portfolioRoot);
+          t.inputEl.removeClass("is-invalid");
+          t.inputEl.style.removeProperty("border-color");
+        });
+      });
 
     containerEl.createEl("h3", { text: "Save behavior" });
     new Setting(containerEl)

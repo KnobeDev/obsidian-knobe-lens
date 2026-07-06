@@ -45,7 +45,7 @@ const BEGIN = KNOBE_BEGIN_B64;
 const END = KNOBE_END_B64;
 // Strip a trailing payload block (and any blank lines before it) when re-sealing.
 // `[\r\n]*` tolerates CRLF blank lines so a CRLF note re-seals cleanly.
-const BLOCK_STRIP = /[\r\n]*-----BEGIN KNOBE B64-----[\s\S]*?-----END KNOBE B64-----\s*$/;
+const BLOCK_STRIP = /[\r\n]*-----BEGIN KNOBE B64-----(?:(?!-----BEGIN KNOBE B64-----)[\s\S])*?-----END KNOBE B64-----\s*$/;
 
 /** Split a note into its YAML frontmatter and body, dropping any existing seal. */
 export function splitNote(raw: string): { frontmatter: string; body: string } {
@@ -62,8 +62,7 @@ export function splitNote(raw: string): { frontmatter: string; body: string } {
 
 function toBase64Utf8(s: string): string {
   const bytes = new TextEncoder().encode(s);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const bin = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
   return btoa(bin);
 }
 
@@ -89,7 +88,7 @@ export async function sealKnobe(
     delete payload.instructions;
   }
   if (opts.embedBody) payload.ext_body_snapshot = trimmedBody;
-  payload.body_hash = await bodyHashOf(body);
+  payload.body_hash = await bodyHashOf(trimmedBody);
   payload.payload_hash = await payloadHashOf(payload);
   const b64 = toBase64Utf8(JSON.stringify(payload)).replace(/(.{76})/g, "$1\n");
   const bodySection = trimmedBody ? `\n\n${trimmedBody}` : "";

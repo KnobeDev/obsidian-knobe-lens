@@ -98,20 +98,24 @@ export async function findUnindexedKnobeFiles(app: App): Promise<DiskReconcileRe
 export async function scanVault(app: App): Promise<ScanRow[]> {
   const rows: ScanRow[] = [];
   for (const file of app.vault.getMarkdownFiles()) {
-    const raw = await app.vault.cachedRead(file);
-    if (!hasKnobeMarker(raw)) continue;
-    const result = await verify(raw);
-    const p = result.payload ?? {};
-    rows.push({
-      file,
-      raw,
-      result,
-      title: pickTitle(p, file.basename),
-      quarantine: typeof p.quarantine_status === "string" ? p.quarantine_status : "—",
-      contentType: typeof p.content_type === "string" ? p.content_type : "—",
-      payloadHash: result.computed,
-      parents: parentHashes(result.payload),
-    });
+    try {
+      const raw = await app.vault.cachedRead(file);
+      if (!hasKnobeMarker(raw)) continue;
+      const result = await verify(raw);
+      const p = result.payload ?? {};
+      rows.push({
+        file,
+        raw,
+        result,
+        title: pickTitle(p, file.basename),
+        quarantine: typeof p.quarantine_status === "string" ? p.quarantine_status : "—",
+        contentType: typeof p.content_type === "string" ? p.content_type : "—",
+        payloadHash: result.computed,
+        parents: parentHashes(result.payload),
+      });
+    } catch {
+      /* File might have been renamed or deleted mid-scan, skip it */
+    }
   }
   return rows;
 }

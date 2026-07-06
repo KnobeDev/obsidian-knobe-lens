@@ -71,9 +71,11 @@ export function renderLineage(
   const depthOf = (h: string, seen: Set<string> = new Set()): number => {
     if (memo.has(h)) return memo.get(h) as number;
     if (seen.has(h)) return 0;
-    seen.add(h);
+    const localSeen = new Set(seen);
+    localSeen.add(h);
     const parents = incoming.get(h) ?? [];
-    const d = parents.length === 0 ? 0 : 1 + Math.max(...parents.map((p) => depthOf(p, seen)));
+    const validParents = parents.filter((p): p is string => typeof p === "string");
+    const d = validParents.length === 0 ? 0 : 1 + Math.max(...validParents.map((p) => depthOf(p, localSeen)));
     memo.set(h, d);
     return d;
   };
@@ -144,7 +146,13 @@ export function renderLineage(
     g.appendChild(t1);
     g.appendChild(t2);
     if (n.present) {
-      const activate = () => onSelect(n.hash, n.present);
+      let activating = false;
+      const activate = () => {
+        if (activating) return;
+        activating = true;
+        onSelect(n.hash, n.present);
+        window.setTimeout(() => { activating = false; }, 100);
+      };
       g.addEventListener("click", activate);
       g.addEventListener("keydown", (ev) => {
         const k = (ev as KeyboardEvent).key;

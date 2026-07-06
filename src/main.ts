@@ -131,7 +131,9 @@ export default class KnobeLensPlugin extends Plugin {
         return true;
       },
     });
-    this.patchSaveCommand();
+    this.app.workspace.onLayoutReady(() => {
+      this.patchSaveCommand();
+    });
     this.addCommand({
       id: "verify-current",
       name: "Verify current note",
@@ -441,7 +443,7 @@ export default class KnobeLensPlugin extends Plugin {
   async openWithEditedHighlights(file: TFile): Promise<void> {
     const snap = this.snapshotFor(file.path);
     const leaf = this.app.workspace.getLeaf(true);
-    await leaf.openFile(file);
+    if (leaf) await leaf.openFile(file);
     if (!snap) {
       new Notice("No last-verified snapshot to compare against.");
       return;
@@ -487,6 +489,7 @@ export default class KnobeLensPlugin extends Plugin {
     this.cancelScheduledReseal(file.path);
     const id = window.setTimeout(() => {
       this.resealTimers.delete(file.path);
+      if (!this.app.vault.getAbstractFileByPath(file.path)) return;
       void this.resealIfKnobe(file);
     }, RESEAL_DEBOUNCE_MS);
     this.resealTimers.set(file.path, id);
@@ -711,7 +714,8 @@ export default class KnobeLensPlugin extends Plugin {
         const verdict = getVerdict(this.trust, result.computed);
         const md = buildReportMarkdown({ file: f, result, verdict, generatedAt });
         const note = await writeReport(this.app, f, md, generatedAt);
-        await this.app.workspace.getLeaf(true).openFile(note);
+        const leaf = this.app.workspace.getLeaf(true);
+        if (leaf) await leaf.openFile(note);
         new Notice(`KNOBE report created for "${f.basename}"`);
       } catch (e) {
         console.error("[knobe-lens] verifyAndReport failed:", e);
@@ -760,7 +764,10 @@ export default class KnobeLensPlugin extends Plugin {
         const f = await writeExample(this.app, ex);
         firstFile = firstFile ?? f;
       }
-      if (firstFile) await this.app.workspace.getLeaf(true).openFile(firstFile);
+      if (firstFile) {
+        const leaf = this.app.workspace.getLeaf(true);
+        if (leaf) await leaf.openFile(firstFile);
+      }
       new Notice(
         examples.length === 1
           ? `Inserted "${examples[0].title}" into ${EXAMPLES_DIR}/.`
