@@ -6,20 +6,46 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Frontmatter edits are honored on re-seal again.** After 0.10.2's
+  preserve-all-context change, a plain re-seal (auto-reseal on save, *Seal
+  current note*, promote, restore) let the last-sealed payload override the
+  note's frontmatter, so editing a sealed note's `title` / `summary` /
+  `license` / `content_type` in frontmatter was silently ignored. Re-seal
+  precedence is now, low → high: settings/frontmatter defaults, the last-sealed
+  payload, **explicit frontmatter edits to those descriptive fields**, then a
+  deliberate caller action. `created_date` stays stable, `quarantine_status`
+  stays promotion-safe (a stale frontmatter value never reverts a promotion),
+  and all opaque/extension/attribution context is still carried through. A
+  typo'd `content_type` in frontmatter is ignored rather than overwriting the
+  sealed value.
+- **Privacy guard hardened.** `privacy_level` is not frontmatter-editable on
+  re-seal (change it deliberately via the save prompt), so a stale or typo'd
+  frontmatter value can never relax a sealed `restricted` posture. The
+  body-embed guard now fails closed: it embeds a self-contained snapshot only
+  for recognized non-restricted levels, so an unrecognized privacy value never
+  causes restricted content to be double-embedded.
+
 ### Changed
 
 - Extracted the native-save hook (`src/save-hook.ts`) and the re-seal
-  field-carry logic (`carriedFields`, now in `src/seal.ts`) out of `main.ts`
-  into pure, unit-tested modules — no behavior change. The save hook now also
-  guards against an `afterSave` error ever breaking the native save it wraps.
+  field-carry / precedence logic (`carriedFields`, `resolveSealFields` in
+  `src/seal.ts`) out of `main.ts` into pure, unit-tested modules — no behavior
+  change beyond the fix above. The save hook now also guards against an
+  `afterSave` error ever breaking the native save it wraps.
 
 ### Tests
 
-- Added `test/save-hook.test.ts` and `test/carried-fields.test.ts` covering the
-  save-command wrap and identity-checked restore (won't strip a later plugin's
-  wrapper) and the carry-forward rules: an intact seal carries opaque/extension
-  fields; a note with no seal, a failed seal, or an unreadable seal carries
-  nothing (never launders a tampered payload). Suite: 160 → 171.
+- Added `test/save-hook.test.ts`, `test/carried-fields.test.ts`, and
+  `test/resolve-fields.test.ts` covering the save-command wrap and
+  identity-checked restore (won't strip a later plugin's wrapper), the
+  carry-forward rules (intact carries opaque/extension fields; no-seal /
+  failed / unreadable carry nothing — never launders a tampered payload), the
+  re-seal precedence (frontmatter edits win for descriptive fields;
+  `created_date` / `quarantine_status` / `privacy_level` stay carried), the
+  fail-closed body-embed guard, and the frontmatter enum validation. Suite:
+  160 → 187.
 
 ## [0.10.2] - 2026-07-06
 

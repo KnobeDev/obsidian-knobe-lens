@@ -85,6 +85,64 @@ export function mergePayloadFields(
   return merged;
 }
 
+/** Managed fields for which frontmatter is the human source of truth: an
+ *  explicit frontmatter value overrides the last-sealed payload on re-seal.
+ *  Deliberately excludes `created_date` (must stay stable across reseals),
+ *  `quarantine_status` (action-managed via promote — a stale frontmatter value
+ *  must never silently revert a promotion), and `privacy_level` (a stale/typo'd
+ *  frontmatter value must never relax the sealed privacy posture and re-enable
+ *  body embedding for `restricted` content — change it deliberately via the save
+ *  prompt). */
+export const FRONTMATTER_DESCRIPTIVE = ["title", "summary", "content_type", "license"] as const;
+
+/** From a note's raw frontmatter, the descriptive fields the user has explicitly
+ *  and *validly* set — the overlay that overrides the last-sealed payload on
+ *  re-seal. `content_type` must be one of `validContentTypes`; a typo is dropped
+ *  so it can never overwrite a good carried value. (Takes the vocab as an
+ *  argument so this module stays free of the settings/Obsidian imports.) */
+export function descriptiveFrontmatter(
+  fm: Record<string, unknown>,
+  validContentTypes: readonly string[],
+): Partial<SealFields> {
+  const out: Record<string, unknown> = {};
+  for (const k of FRONTMATTER_DESCRIPTIVE) {
+    const v = fm[k];
+    if (typeof v !== "string" || !v.trim()) continue;
+    if (k === "content_type" && !validContentTypes.includes(v)) continue;
+    out[k] = v;
+  }
+  return out as Partial<SealFields>;
+}
+
+/** Whether a self-contained body snapshot may be embedded, given the setting and
+ *  the resolved privacy level. Fail-closed: only the recognized non-restricted
+ *  levels ever embed, so an unrecognized/typo'd level is treated as unsafe and
+ *  `restricted` content is never double-embedded. */
+export function mayEmbedBody(enabled: boolean, privacyLevel: unknown): boolean {
+  return enabled && (privacyLevel === "public" || privacyLevel === "internal" || privacyLevel === "sensitive");
+}
+
+/**
+ * Resolve the fields for a (re)seal by precedence, low → high:
+ *   1. `defaults`    — settings/frontmatter fallback that drives a brand-new seal,
+ *   2. `carried`     — the last-sealed payload: stable dates, trust posture, and
+ *                      every opaque/extension/context field survive the re-seal,
+ *   3. `frontmatter` — explicit frontmatter edits to descriptive fields
+ *                      (the caller passes only FRONTMATTER_DESCRIPTIVE keys), and
+ *   4. `overrides`   — a deliberate caller action (save prompt, promote, reseal).
+ * Later layers win. `overrides` attribution is source-merged onto the carried
+ * attribution (via mergePayloadFields) so per-source metadata is never shed.
+ */
+export function resolveSealFields(
+  defaults: SealFields,
+  carried: Partial<SealFields>,
+  frontmatter: Partial<SealFields>,
+  overrides: Partial<SealFields>,
+): SealFields {
+  const base = { ...defaults, ...carried, ...frontmatter };
+  return mergePayloadFields(base, overrides) as SealFields;
+}
+
 /** Create a protocol-shaped lineage receipt. */
 export function parentReceipt(
   payloadHash: string,

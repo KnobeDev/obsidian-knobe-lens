@@ -7,15 +7,17 @@ import { isFiledUnder, isFolder, listPortfolioFolders, portfolioPath, sanitizePo
 import { KNOBE_LENS_VIEW, KnobeLensView } from "./view";
 import {
   carriedFields,
-  mergePayloadFields,
+  descriptiveFrontmatter,
+  mayEmbedBody,
   parentReceipt,
+  resolveSealFields,
   sealKnobe,
   splitNote,
   SealFields,
   ResealComment,
 } from "./seal";
 import { installSaveHook } from "./save-hook";
-import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab } from "./settings";
+import { KnobeLensSettings, DEFAULT_SETTINGS, KnobeLensSettingTab, CONTENT_TYPES } from "./settings";
 import { TrustLedger, Verdict, setVerdict, clearVerdict, getVerdict } from "./trust";
 import { buildReportMarkdown, writeReport, KnobePickModal, reportFailedNotice } from "./report";
 import { scanVault } from "./scanner";
@@ -269,19 +271,32 @@ export default class KnobeLensPlugin extends Plugin {
     return `---\ntitle: ${JSON.stringify(fields.title)}\nspec_version: "1.0"\n---`;
   }
 
-  private async buildSealed(file: TFile, raw: string, overrides: Partial<SealFields> = {}): Promise<string> {
-    const { frontmatter, body } = splitNote(raw);
-    const carried = await carriedFields(raw);
-    const merged = mergePayloadFields(carried as Record<string, unknown>, overrides);
-    return this.buildSealedParts(file, frontmatter, body, merged as Partial<SealFields>);
+  /** Descriptive managed fields the user has explicitly set in the note's
+   *  frontmatter. On re-seal these override the last-sealed payload — frontmatter
+   *  is the human source of truth for them (see FRONTMATTER_DESCRIPTIVE). */
+  private frontmatterDescriptive(file: TFile): Partial<SealFields> {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+    return descriptiveFrontmatter(fm, CONTENT_TYPES);
   }
 
-  private async buildSealedParts(
-    file: TFile, frontmatter: string, body: string, overrides: Partial<SealFields> = {},
-  ): Promise<string> {
-    const fields = { ...this.fieldsFor(file), ...overrides };
-    // Privacy guard: never embed a second copy of restricted content.
-    const embedBody = this.settings.embedBodySnapshot && fields.privacy_level !== "restricted";
+  /** Resolve the full field set for a (re)seal: settings/frontmatter defaults,
+   *  then the last-sealed payload (stable dates, trust posture, opaque fields),
+   *  then explicit frontmatter edits to descriptive fields, then caller overrides. */
+  private async resolveFields(file: TFile, raw: string, overrides: Partial<SealFields>): Promise<SealFields> {
+    const carried = await carriedFields(raw);
+    return resolveSealFields(this.fieldsFor(file), carried, this.frontmatterDescriptive(file), overrides);
+  }
+
+  private async buildSealed(file: TFile, raw: string, overrides: Partial<SealFields> = {}): Promise<string> {
+    const { frontmatter, body } = splitNote(raw);
+    const fields = await this.resolveFields(file, raw, overrides);
+    return this.buildSealedParts(frontmatter, body, fields);
+  }
+
+  private buildSealedParts(frontmatter: string, body: string, fields: SealFields): Promise<string> {
+    // Privacy guard (fail-closed): never embed a second copy of restricted — or
+    // unrecognized-privacy — content.
+    const embedBody = mayEmbedBody(this.settings.embedBodySnapshot, fields.privacy_level);
     return sealKnobe(this.ensureFrontmatter(frontmatter, fields), body, fields, { embedBody });
   }
 
@@ -541,9 +556,9 @@ export default class KnobeLensPlugin extends Plugin {
         return;
       }
       const { frontmatter } = splitNote(raw);
-      // Restoring the body must not shed the payload-only fields.
-      const carried = await carriedFields(raw);
-      const sealed = await this.buildSealedParts(file, frontmatter, snap, carried);
+      // Restoring the body must not shed payload context; same precedence as a reseal.
+      const fields = await this.resolveFields(file, raw, {});
+      const sealed = await this.buildSealedParts(frontmatter, snap, fields);
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
       new Notice("Restored body from the embedded snapshot.");
     } catch (e) {
