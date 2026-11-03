@@ -6,6 +6,8 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-03
+
 ### Added
 
 - **Automatic verification**, on by default: sealed notes are verified on
@@ -454,6 +456,7 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.11.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.11.0
 [0.10.4]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.4
 [0.10.3]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.3
 [0.10.2]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.2
