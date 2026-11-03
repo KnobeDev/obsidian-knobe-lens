@@ -428,18 +428,20 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
-[0.10.2]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.10.2
-[0.10.1]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.10.1
-[0.10.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.10.0
-[0.9.2]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.9.2
-[0.9.1]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.9.1
-[0.9.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.9.0
-[0.8.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.8.0
-[0.7.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.7.0
-[0.6.1]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.6.1
-[0.6.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.6.0
-[0.5.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.5.0
-[0.4.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.4.0
-[0.3.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.3.0
-[0.2.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.2.0
-[0.1.0]: https://github.com/PersonalProjects/obsidian-knobe-lens/releases/tag/0.1.0
+[0.10.4]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.4
+[0.10.3]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.3
+[0.10.2]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.2
+[0.10.1]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.1
+[0.10.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.0
+[0.9.2]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.9.2
+[0.9.1]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.9.1
+[0.9.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.9.0
+[0.8.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.8.0
+[0.7.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.7.0
+[0.6.1]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.6.1
+[0.6.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.6.0
+[0.5.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.5.0
+[0.4.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.4.0
+[0.3.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.3.0
+[0.2.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.2.0
+[0.1.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.1.0

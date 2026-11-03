@@ -7,10 +7,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PersonalProjects/obsidian-knobe-lens.git"
+    "url": "https://github.com/KnobeDev/obsidian-knobe-lens.git"
   },
   "bugs": {
-    "url": "https://github.com/PersonalProjects/obsidian-knobe-lens/issues"
+    "url": "https://github.com/KnobeDev/obsidian-knobe-lens/issues"
   },
   "scripts": {
     "dev": "node esbuild.config.mjs",
