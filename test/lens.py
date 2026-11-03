@@ -278,8 +278,11 @@ def check_conformance(payload, missing, fm_ok, fm_reason, fm_spec, block_count):
         errors.append(f"bare numeric value(s) in payload (spec §5 requires strings): "
                       f"{', '.join(shown)}")
 
-    # 9. Parent hash format (spec §4)
-    for i, parent in enumerate(payload.get("parents", []) or []):
+    # 9. Parent hash format (spec §4). parents MUST be a list; a non-list value
+    #    (e.g. a bare number) is already flagged by the numeric scan above — skip
+    #    the per-parent check rather than crash on a non-iterable.
+    _parents = payload.get("parents")
+    for i, parent in enumerate(_parents if isinstance(_parents, list) else []):
         if isinstance(parent, dict) and "payload_hash" in parent:
             pph = parent["payload_hash"]
             if not isinstance(pph, str) or not HEX64.match(pph):
@@ -382,7 +385,15 @@ def verify(path):
 
     canon = json.dumps(obj, sort_keys=True, separators=(",", ":"),
                        ensure_ascii=False, allow_nan=False)
-    computed = hashlib.sha256(canon.encode("utf-8")).hexdigest()
+    try:
+        computed = hashlib.sha256(canon.encode("utf-8")).hexdigest()
+    except UnicodeEncodeError:
+        # A payload string containing an unpaired surrogate (e.g. "\ud800")
+        # parses as JSON but cannot be UTF-8 encoded, so it cannot be
+        # canonicalized. Reject as unreadable rather than raising.
+        return _unreadable("payload contains characters that cannot be UTF-8 "
+                           "encoded (e.g. an unpaired surrogate); rejected",
+                           blocks, payload=payload)
 
     # --- required-field presence ---
     missing = [f for f in REQUIRED if f not in payload]
@@ -403,7 +414,12 @@ def verify(path):
     body_verified = "omitted"
     if state == "verified" and "body_hash" in payload and len(blocks) == 1:
         b64_marker = '\n-----BEGIN KNOBE B64-----\n'
-        pre = raw[:raw.rindex(b64_marker)]
+        # rfind (not rindex): a file that begins with the BEGIN marker at byte 0
+        # has no preceding newline, so the marker-with-newline is absent. Treat
+        # the pre-marker text as empty -> _find_body_start returns None -> the
+        # unreadable path below, rather than raising ValueError.
+        marker_pos = raw.rfind(b64_marker)
+        pre = raw[:marker_pos] if marker_pos != -1 else ""
         body_start = _find_body_start(pre)
         if body_start is None:
             return _unreadable("body_hash present but YAML frontmatter "
