@@ -6,6 +6,32 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic verification**, on by default: sealed notes are verified on
+  startup and after creation, edits, and moves, even while the dashboard is
+  closed. It only records intact snapshots for later comparison; it never
+  grants trust or writes to notes. A dashboard toggle pauses it in favour of
+  an explicit Rescan.
+- **Scan folder**: limit the dashboard and automatic verification to one
+  folder and its subfolders. The choice follows the folder if it is renamed
+  or moved.
+- **Create portfolio** button: create an empty portfolio folder without first
+  selecting a document.
+
+### Changed
+
+- Unreadable files and HTML envelopes now report body verification as
+  `omitted` rather than an empty value (spec §7; ERRATA E11 accepts either).
+- The multiple-payload-block warning names the block evaluated, e.g.
+  "evaluated block 2 of 2".
+
+### Fixed
+
+- World globe: coalesced ResizeObserver callbacks to one resize per animation frame and skipped no-op resizes. Writing `canvas.width/height` inside the observer callback could re-trigger the observer; during a pane-close collapse animation this became a resize storm (continuous canvas backing-store reallocation) that could wedge the GPU/compositor on Linux.
+- The new-portfolio dialog disables its Create button while working and
+  returns focus to the button that opened it.
+
 ## [0.10.4] - 2026-11-03
 
 ### Changed

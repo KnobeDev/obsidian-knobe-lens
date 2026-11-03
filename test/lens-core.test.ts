@@ -10,7 +10,7 @@ const VEC = join(ROOT, "test", "vectors");
 interface Expected {
   state: string;
   conformance: string;
-  body_verified: string | null;
+  body_verified: string;
   computed: string | null;
   stored: string | null;
   block_count: number;
@@ -33,6 +33,23 @@ describe("lens-core matches reference lens.py on the 9 conformance vectors", () 
       if (e.stored) expect(r.stored).toBe(e.stored);
     });
   }
+});
+
+describe("current spec verification output", () => {
+  it("reports omitted body verification for unreadable and failed payloads", async () => {
+    for (const file of ["unreadable.knobe.md", "payload-modified.knobe.md"]) {
+      const result = await verify(readFileSync(join(VEC, file), "utf-8"));
+      expect(result.bodyVerified).toBe("omitted");
+    }
+  });
+
+  it("identifies both the evaluated block index and total block count", async () => {
+    const result = await verify(readFileSync(join(VEC, "multi-block.knobe.md"), "utf-8"));
+    expect(result.conformanceIssues).toContain(
+      "multiple payload blocks present (2); evaluated block 2 of 2 per spec §3.3",
+    );
+    expect(result.bodyVerified).toBe("omitted");
+  });
 });
 
 describe("hardening cases beyond the published vectors", () => {

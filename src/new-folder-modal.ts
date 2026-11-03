@@ -13,6 +13,7 @@ import { App, Modal } from "obsidian";
 import { sanitizePortfolioName } from "./portfolio";
 
 interface NewFolderModalOptions {
+  onClose?: () => void;
   /** Returns an error message to show inline, or null on success. */
   onSubmit: (name: string) => Promise<string | null>;
 }
@@ -57,6 +58,10 @@ export class NewFolderModal extends Modal {
         return;
       }
       busy = true;
+      // aria-disabled, not disabled: a natively disabled button drops focus
+      // to <body> mid-submit (SC 2.4.3). The busy latch blocks re-entry.
+      create.setAttr("aria-disabled", "true");
+      contentEl.setAttr("aria-busy", "true");
       try {
         const problem = await this.opts.onSubmit(name);
         if (problem) { showError(problem); return; }
@@ -65,6 +70,8 @@ export class NewFolderModal extends Modal {
         showError(e instanceof Error ? e.message : String(e));
       } finally {
         busy = false;
+        create.removeAttribute("aria-disabled");
+        contentEl.removeAttribute("aria-busy");
       }
     };
 
@@ -89,5 +96,6 @@ export class NewFolderModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+    this.opts.onClose?.();
   }
 }

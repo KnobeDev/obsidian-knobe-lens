@@ -11,7 +11,7 @@ import { buildLineage } from "./lineage";
 import { renderLineage } from "./lineage-render";
 import { WorldGlobe, WorldDatum, WorldEdge, WorldRenderData } from "./world-render";
 import { getVerdict } from "./trust";
-import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder } from "./portfolio";
+import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder, isFolder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
 import { groupPortfolioRows, groupRecognitionRows } from "./board";
 import {
@@ -38,6 +38,8 @@ const STATE_ICON: Record<Status, string> = {
   unreadable: "help-circle",
 };
 
+let controlIdSeq = 0;
+
 export class KnobeLensView extends ItemView {
   private rows: ScanRow[] = [];
   private selectedPath: string | null = null;
@@ -49,6 +51,7 @@ export class KnobeLensView extends ItemView {
   private world: WorldGlobe | null = null;
   private lineageEl!: HTMLElement;
   private portfoliosEl!: HTMLElement;
+  private folderSelect!: HTMLSelectElement;
   private summaryEl!: HTMLElement;
   // Persistent notice for KNOBE files found on disk but not in Obsidian's index
   // (populated only by an explicit deep Rescan).
@@ -115,8 +118,35 @@ export class KnobeLensView extends ItemView {
       cls: "knobe-lens-primary-action",
       text: "Protocol guide",
     });
-    guide.setAttr("aria-label", "Open the KNOBE Protocol reference");
+    guide.setAttr("aria-label", "Protocol guide: Open the KNOBE Protocol reference");
     guide.onclick = () => this.plugin.openProtocolReference();
+
+    // Per-instance ids: two dashboard leaves must not share label/description targets.
+    const uid = ++controlIdSeq;
+    const folderId = `kl-scan-folder-${uid}`, autoHelpId = `kl-auto-help-${uid}`;
+    const controls = root.createDiv({ cls: "knobe-lens-actions" });
+    controls.createEl("label", { text: "Scan folder", attr: { for: folderId } });
+    const folder = controls.createEl("select", { attr: { id: folderId } });
+    this.folderSelect = folder;
+    this.updateFolderOptions();
+    folder.onchange = async () => {
+      this.plugin.settings.verificationFolder = folder.value;
+      await this.plugin.saveSettings();
+      await this.refresh();
+      this.setActionStatus(`Scan folder: ${folder.value || "Entire vault"}.`);
+    };
+    const autoLabel = controls.createEl("label");
+    const auto = autoLabel.createEl("input", { attr: { type: "checkbox", "aria-describedby": autoHelpId } });
+    auto.checked = this.plugin.settings.autoVerify;
+    autoLabel.createSpan({ text: "Automatically verify changes" });
+    auto.onchange = async () => {
+      this.plugin.settings.autoVerify = auto.checked;
+      await this.plugin.saveSettings();
+      this.scheduleRefresh.cancel();
+      if (auto.checked) await this.refresh(false);
+      this.setActionStatus(`Automatic verification ${auto.checked ? "enabled" : "paused"}.`);
+    };
+    root.createEl("p", { cls: "knobe-lens-note", text: "Verifies sealed notes in the selected folder and its subfolders, including while the dashboard is closed. Review and filing remain your decision.", attr: { id: autoHelpId } });
 
     root.createEl("p", {
       cls: "knobe-lens-note",
@@ -155,6 +185,20 @@ export class KnobeLensView extends ItemView {
     this.lineageEl = root.createDiv({ cls: "knobe-lens-lineage" });
 
     root.createEl("h4", { text: "Portfolios" });
+    const createPortfolio = root.createEl("button", { text: "Create portfolio" });
+    createPortfolio.onclick = () => {
+      new NewFolderModal(this.app, {
+        onClose: () => createPortfolio.focus(),
+        onSubmit: async (name) => {
+          try {
+            await this.plugin.createPortfolioFolder(name);
+            await this.refresh(false);
+            this.setActionStatus(`Created portfolio "${name}".`);
+            return null;
+          } catch (e) { return errorMessage(e); }
+        },
+      }).open();
+    };
     this.portfoliosEl = root.createDiv({ cls: "knobe-lens-portfolios" });
 
     this.registerVaultAutoRefresh();
@@ -184,14 +228,15 @@ export class KnobeLensView extends ItemView {
   private registerVaultAutoRefresh(): void {
     const structural = (f: TAbstractFile): void => {
       // Folders (not TFile) always matter; files only when markdown.
-      if (!(f instanceof TFile) || f.extension === "md") this.scheduleRefresh();
+      if (!(f instanceof TFile)) this.updateFolderOptions();
+      if (this.plugin.settings.autoVerify && (!(f instanceof TFile) || f.extension === "md")) this.scheduleRefresh();
     };
     this.registerEvent(this.app.vault.on("create", structural));
     this.registerEvent(this.app.vault.on("delete", structural));
     this.registerEvent(this.app.vault.on("rename", structural));
     this.registerEvent(
       this.app.vault.on("modify", (f) => {
-        if (f instanceof TFile && f.extension === "md") this.scheduleRefresh();
+        if (this.plugin.settings.autoVerify && f instanceof TFile && f.extension === "md") this.scheduleRefresh();
       }),
     );
   }
@@ -225,11 +270,29 @@ export class KnobeLensView extends ItemView {
     }
   }
 
+  private updateFolderOptions(): void {
+    const select = this.folderSelect;
+    if (!select) return;
+    const scope = this.plugin.settings.verificationFolder;
+    const paths = this.app.vault.getAllLoadedFiles().filter(isFolder)
+      .map(f => f.path).filter(path => path !== "/").sort((a, b) => a.localeCompare(b));
+    const entries = [["", "Entire vault"], ...paths.map(path => [path, path])];
+    if (scope && !paths.includes(scope)) entries.push([scope, `${scope} (missing folder)`]);
+    const signature = JSON.stringify(entries);
+    if (select.dataset.options !== signature) {
+      select.empty();
+      for (const [value, text] of entries) select.createEl("option", { text, attr: { value } });
+      select.dataset.options = signature;
+    }
+    select.value = scope;
+  }
+
   private async runRefresh(announce: boolean, deep = false): Promise<void> {
+    this.updateFolderOptions();
     this.noticeEl.empty(); // clear any stale disk-reconcile notice; re-filled only on a deep scan
     if (announce) this.setSummary("Scanning vault…");
     try {
-      this.rows = await scanVault(this.app);
+      this.rows = await scanVault(this.app, this.plugin.settings.verificationFolder);
     } catch (e) {
       console.error("[knobe-lens] scan failed:", e);
       this.setSummary("Scan failed — see the developer console.");

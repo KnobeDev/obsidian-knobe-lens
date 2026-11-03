@@ -15,7 +15,7 @@
 
 export type Status = "verified" | "verified-body-modified" | "failed" | "unreadable";
 export type Conformance = "valid" | "warnings" | "invalid";
-export type BodyVerified = "yes" | "modified" | "omitted" | null;
+export type BodyVerified = "yes" | "modified" | "omitted";
 
 export interface LensResult {
   state: Status;
@@ -399,7 +399,7 @@ function checkConformance(
     }
   });
 
-  if (blockCount > 1) warnings.push(`multiple payload blocks present (${blockCount}); evaluated the last block per spec §3.3`);
+  if (blockCount > 1) warnings.push(`multiple payload blocks present (${blockCount}); evaluated block ${blockCount} of ${blockCount} per spec §3.3`);
 
   for (const field of Object.keys(CANONICAL_VOCAB)) {
     const v = payload[field];
@@ -417,7 +417,7 @@ function checkConformance(
 function unreadable(reason: string, blockCount: number, payload: Record<string, unknown> | null = null): LensResult {
   return {
     state: "unreadable", computed: null, stored: null, payload, missing: [],
-    body: null, bodyVerified: null, conformance: "invalid", conformanceIssues: [reason],
+    body: null, bodyVerified: "omitted", conformance: "invalid", conformanceIssues: [reason],
     multipleBlocks: blockCount > 1, blockCount, reason,
   };
 }
@@ -529,7 +529,7 @@ async function verifyHtmlEnvelope(raw: string): Promise<LensResult> {
   return {
     state: res.hash === stored ? "verified" : "failed",
     computed: res.hash, stored, payload, missing: [],
-    body: null, bodyVerified: null,
+    body: null, bodyVerified: "omitted",
     conformance: "valid", conformanceIssues: [],
     multipleBlocks: false, blockCount: 1, reason: null,
   };

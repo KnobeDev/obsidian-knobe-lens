@@ -16,6 +16,8 @@ export interface KnobeLensSettings {
   promptOnSave: boolean;
   embedBodySnapshot: boolean;
   portfolioRoot: string;
+  verificationFolder: string;
+  autoVerify: boolean;
 }
 
 export const DEFAULT_SETTINGS: KnobeLensSettings = {
@@ -31,6 +33,8 @@ export const DEFAULT_SETTINGS: KnobeLensSettings = {
   promptOnSave: true,
   embedBodySnapshot: false,
   portfolioRoot: "KNOBE Portfolios",
+  verificationFolder: "",
+  autoVerify: true,
 };
 
 export const CONTENT_TYPES = ["original", "synthesis", "adaptation", "compression", "annotation", "seed", "collection", "translation"];

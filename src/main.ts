@@ -31,12 +31,14 @@ import { ExamplePickerModal, writeExample, EXAMPLES_DIR } from "./examples-inser
 import { ProtocolReferenceModal } from "./protocol-reference-modal";
 import { detailsToOverrides, prefillDetails } from "./seal-details";
 import { SealDetailsModal } from "./seal-details-modal";
+import { withinFolder, renamedVerificationFolder } from "./verification-scope";
 
 const RESEAL_DEBOUNCE_MS = 900;
 const SETTINGS_KEYS: (keyof KnobeLensSettings)[] = [
   "author", "contribution", "license", "contentType",
   "privacyLevel", "quarantineStatus", "defaultSummary", "defaultInstructions",
   "resealOnSave", "promptOnSave", "embedBodySnapshot", "portfolioRoot",
+  "verificationFolder", "autoVerify",
 ];
 
 /* ---- in-editor "EDITED, RECONFIRM" highlights ----------------------------
@@ -84,6 +86,11 @@ export default class KnobeLensPlugin extends Plugin {
   private snapshots: Record<string, Snapshot> = {};
   private portfolioColors: PortfolioColors = {};
   private resealTimers = new Map<string, number>();
+  private verificationTimers = new Map<string, number>();
+  private unloaded = false;
+  private sweepRunning = false;
+  private sweepQueued = false;
+  private lastSweptScope: string | null = null;
   private statusBar: HTMLElement | null = null;
   private sealPromptOpen = false;
   private restoreSaveCommand: (() => void) | null = null;
@@ -129,6 +136,8 @@ export default class KnobeLensPlugin extends Plugin {
     });
     this.app.workspace.onLayoutReady(() => {
       this.patchSaveCommand();
+      this.lastSweptScope = this.verificationScopeKey();
+      void this.verifyScopedFiles();
     });
     this.addCommand({
       id: "verify-current",
@@ -167,12 +176,30 @@ export default class KnobeLensPlugin extends Plugin {
       this.app.vault.on("modify", (f) => {
         if (!(f instanceof TFile) || f.extension !== "md") return;
         if (this.settings.resealOnSave) this.scheduleReseal(f);
+        this.scheduleVerification(f);
         if (f === this.app.workspace.getActiveFile()) void this.updateStatusBar();
       }),
     );
-    this.registerEvent(this.app.vault.on("delete", (f) => void this.pruneSnapshot(f.path)));
+    this.registerEvent(this.app.vault.on("create", (f) => {
+      if (f instanceof TFile && f.extension === "md") this.scheduleVerification(f);
+    }));
+    this.registerEvent(this.app.vault.on("delete", (f) => {
+      this.cancelScheduledVerification(f.path);
+      void this.pruneSnapshot(f.path);
+    }));
     this.registerEvent(
-      this.app.vault.on("rename", (f, oldPath) => void this.renameSnapshot(oldPath, f.path)),
+      this.app.vault.on("rename", (f, oldPath) => {
+        this.cancelScheduledVerification(oldPath);
+        void this.renameSnapshot(oldPath, f.path);
+        if (f instanceof TFolder) {
+          const folder = renamedVerificationFolder(this.settings.verificationFolder, oldPath, f.path);
+          if (folder !== this.settings.verificationFolder) {
+            this.settings.verificationFolder = folder;
+            void this.saveSettings();
+          }
+        }
+        if (f instanceof TFile && f.extension === "md") this.scheduleVerification(f);
+      }),
     );
   }
 
@@ -457,6 +484,79 @@ export default class KnobeLensPlugin extends Plugin {
     if (prev) {
       window.clearTimeout(prev);
       this.resealTimers.delete(path);
+    }
+  }
+
+  private cancelScheduledVerification(path: string): void {
+    const timer = this.verificationTimers.get(path);
+    if (timer !== undefined) window.clearTimeout(timer);
+    this.verificationTimers.delete(path);
+  }
+
+  private scheduleVerification(file: TFile): void {
+    const path = file.path;
+    this.cancelScheduledVerification(path);
+    if (!this.settings.autoVerify || !withinFolder(path, this.settings.verificationFolder)) return;
+    this.verificationTimers.set(path, window.setTimeout(() => {
+      this.verificationTimers.delete(path);
+      void this.verifyInBackground(file);
+    }, 500));
+  }
+
+  /** Verification only records intact snapshots; it never grants trust or writes notes. */
+  private async verifyInBackground(file: TFile, persist = true): Promise<boolean> {
+    const path = file.path;
+    if (this.unloaded || !this.settings.autoVerify || !withinFolder(path, this.settings.verificationFolder)) return false;
+    if (this.app.vault.getAbstractFileByPath(path) !== file) return false;
+    try {
+      // Cheap cached probe first: most notes carry no seal and need no disk read.
+      if (!hasKnobeMarker(await this.app.vault.cachedRead(file))) return false;
+      const raw = await this.app.vault.read(file);
+      if (!hasKnobeMarker(raw)) return false;
+      const result = await verify(raw);
+      if (this.unloaded || file.path !== path || !this.settings.autoVerify
+        || !withinFolder(path, this.settings.verificationFolder)
+        || this.app.vault.getAbstractFileByPath(path) !== file) return false;
+      // Do not save a stale result if an edit arrived during verification.
+      if (await this.app.vault.read(file) !== raw) { this.scheduleVerification(file); return false; }
+      if (this.unloaded || !this.settings.autoVerify || file.path !== path
+        || !withinFolder(path, this.settings.verificationFolder)
+        || this.app.vault.getAbstractFileByPath(path) !== file) return false;
+      const changed = result.state === "verified" && !!result.computed
+        && this.stageSnapshot(path, result.computed, raw);
+      if (changed && persist) await this.persist();
+      return changed;
+    } catch (e) {
+      console.error("[knobe-lens] background verification failed:", e);
+      return false;
+    }
+  }
+
+  async verifyScopedFiles(): Promise<void> {
+    if (!this.settings.autoVerify || this.unloaded) return;
+    // One sweep at a time; a request during a sweep queues exactly one more.
+    if (this.sweepRunning) { this.sweepQueued = true; return; }
+    this.sweepRunning = true;
+    try {
+      await this.sweepScopedFiles();
+    } finally {
+      this.sweepRunning = false;
+    }
+    if (this.sweepQueued) {
+      this.sweepQueued = false;
+      await this.verifyScopedFiles();
+    }
+  }
+
+  private async sweepScopedFiles(): Promise<void> {
+    let changed = false;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (this.unloaded) break;
+      changed = await this.verifyInBackground(file, false) || changed;
+    }
+    if (changed && !this.unloaded) {
+      try { await this.persist(); }
+      catch (e) { console.error("[knobe-lens] could not persist verified snapshots:", e); }
     }
   }
 
@@ -783,9 +883,23 @@ export default class KnobeLensPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.persist();
+    // Only a change of verification scope warrants a sweep; typing an author
+    // name or toggling an unrelated option must not re-read the vault.
+    const scope = this.verificationScopeKey();
+    if (scope !== this.lastSweptScope) {
+      this.lastSweptScope = scope;
+      void this.verifyScopedFiles();
+    }
+  }
+
+  private verificationScopeKey(): string {
+    return this.settings.autoVerify + "\u0000" + this.settings.verificationFolder;
   }
 
   onunload(): void {
+    this.unloaded = true;
+    for (const id of this.verificationTimers.values()) window.clearTimeout(id);
+    this.verificationTimers.clear();
     for (const id of this.resealTimers.values()) window.clearTimeout(id);
     this.resealTimers.clear();
     this.restoreSaveCommand?.();

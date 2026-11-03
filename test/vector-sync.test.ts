@@ -29,17 +29,17 @@ const OFFICIAL: Record<string, { state: string; conformance: string }> = {
   "multi-block.knobe.md": { state: "verified", conformance: "warnings" },
 };
 
-const ADVERSARIAL: Record<string, { state: string; bodyVerified: string | null; conformance: string }> = {
+const ADVERSARIAL: Record<string, { state: string; bodyVerified: string; conformance: string }> = {
   "bad-attribution-sources-type.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
   "bad-body-hash-format.knobe.md": { state: "verified-body-modified", bodyVerified: "modified", conformance: "invalid" },
   "bad-created-date.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
   "control-character-title.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
-  "duplicate-key.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+  "duplicate-key.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
   "multi-block-warning.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "warnings" },
-  "nfc-key-collision.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+  "nfc-key-collision.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
   "no-frontmatter-valid-payload.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
-  "payload-array.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
-  "unsupported-spec-version.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
+  "payload-array.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
+  "unsupported-spec-version.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
 };
 
 const BUNDLED = join(process.cwd(), "test", "vectors");

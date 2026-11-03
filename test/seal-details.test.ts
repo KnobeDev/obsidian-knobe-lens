@@ -32,6 +32,8 @@ const settings = (over: Partial<KnobeLensSettings> = {}): KnobeLensSettings => (
   promptOnSave: true,
   embedBodySnapshot: false,
   portfolioRoot: "KNOBE Portfolios",
+  verificationFolder: "",
+  autoVerify: true,
   ...over,
 });
 

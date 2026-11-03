@@ -74,7 +74,7 @@
   "unreadable.knobe.md": {
     "state": "unreadable",
     "conformance": "invalid",
-    "body_verified": null,
+    "body_verified": "omitted",
     "computed": null,
     "stored": null,
     "block_count": 1,

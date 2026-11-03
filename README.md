@@ -58,6 +58,14 @@ cd obsidian-knobe-lens && npm install && npm run build
 | Examples | *Insert an example KNOBE* drops real, verifiable KNOBE Protocol v1 documents (including a linked source → agent-synthesis pair) into `KNOBE Examples/`. |
 | Protocol guide | An in-app reference: the three verdicts, recognition states, conformance levels, the field vocabulary (generated from the verifier so it can't drift), required fields, honest limits, and links to knobe.org. |
 
+## Automatic verification and folder selection
+
+Use **Scan folder** in the dashboard to choose the entire vault or one folder and its subfolders. **Automatically verify changes** is enabled by default: sealed Markdown notes are checked on startup and after creation, edits, or moves, even while the dashboard is closed. Verification preserves intact snapshots for later comparison; review and trust decisions remain yours. Pause the toggle to use explicit Rescan instead.
+
+Use **Create portfolio** to create an empty portfolio folder without first selecting a document. File reviewed objects using each card's existing Move to portfolio control.
+
+Verification reports payload integrity, body integrity (`yes`, `modified`, or `omitted`), and conformance separately. Multiple payload blocks identify which block was evaluated; their body integrity is omitted because extraction is ambiguous.
+
 ## Design principles
 
 - **Integrity, not truth.** A verified seal proves the payload is intact — not that it is true, safe, or cleared. The UI keeps `quarantine_status` visible and defaults to quarantine-first.

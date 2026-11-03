@@ -299,6 +299,8 @@ export class WorldGlobe {
   destroy(): void {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.resizeRaf) cancelAnimationFrame(this.resizeRaf);
+    this.resizeRaf = 0;
     this.resizeObserver?.disconnect();
     window.removeEventListener("resize", this.onWindowResize);
     // Release any capture from a drag interrupted by the view closing, and drop
@@ -377,9 +379,25 @@ export class WorldGlobe {
 
   /* ---- sizing ---- */
 
+  private resizeScheduled = false;
+  private resizeRaf = 0;
+
   private wireResize(): void {
     if (typeof ResizeObserver === "function") {
-      this.resizeObserver = new ResizeObserver(() => this.resize());
+      // Coalesce observer callbacks to at most one resize per animation
+      // frame. Writing canvas.width/height inside a ResizeObserver callback
+      // can re-trigger the observer (layout feedback); during a pane-close
+      // collapse animation that becomes a resize storm — continuous canvas
+      // backing-store reallocation that can wedge the GPU/compositor.
+      this.resizeObserver = new ResizeObserver(() => {
+        if (this.resizeScheduled) return;
+        this.resizeScheduled = true;
+        this.resizeRaf = requestAnimationFrame(() => {
+          this.resizeRaf = 0;
+          this.resizeScheduled = false;
+          this.resize();
+        });
+      });
       this.resizeObserver.observe(this.container);
     }
     window.addEventListener("resize", this.onWindowResize);
@@ -389,7 +407,12 @@ export class WorldGlobe {
     const cssW = Math.max(0, this.canvas.clientWidth);
     const cssH = Math.max(0, this.canvas.clientHeight);
     if (cssW === 0 || cssH === 0) return; // not laid out yet
-    this.dpr = Math.max(1, window.devicePixelRatio || 1);
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    // A no-op resize must return before touching the canvas: writing
+    // canvas.width re-triggers the ResizeObserver, and without this guard
+    // the observer and the canvas feed each other in a loop.
+    if (cssW === this.W && cssH === this.H && dpr === this.dpr) return;
+    this.dpr = dpr;
     this.W = cssW;
     this.H = cssH;
     this.canvas.width = Math.round(cssW * this.dpr);
