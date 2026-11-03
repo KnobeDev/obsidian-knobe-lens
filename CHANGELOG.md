@@ -6,6 +6,18 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-03
+
+### Changed
+
+- **Conformance now locked to the protocol's published rulings.** A new
+  drift guard runs Lens against the upstream interpretation vectors that pin
+  the ERRATA rulings (E2, E5–E9), including the exact issue text for a
+  frontmatter/payload `spec_version` mismatch and a missing `attribution`.
+  Lens already agreed with the reference verifier on all 25 published
+  vectors; this keeps it that way when a ruling is added or revised.
+- Refreshed the bundled reference copy of `lens.py` to upstream.
+
 ## [0.10.3] - 2026-07-06
 
 ### Fixed
