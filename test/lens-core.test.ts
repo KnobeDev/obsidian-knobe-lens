@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { verify, hasKnobeMarker } from "../src/lens-core";
+import { verify, hasKnobeMarker, payloadHashOf, safeLines } from "../src/lens-core";
 
 const ROOT = process.cwd();
 const VEC = join(ROOT, "test", "vectors");
@@ -201,6 +201,16 @@ describe("KNOBE.AI 0.1 HTML-comment / claim-fields-join envelope", () => {
     expect(r.reason).toContain("separator");
   });
 
+  it("rejects an unpaired surrogate, which would hash the same as U+FFFD", async () => {
+    // TextEncoder writes a lone surrogate as EF BF BD, the bytes of U+FFFD, so
+    // two different claims would share one hash.
+    const sha = claimHash([String.fromCharCode(0xfffd), "beta value"]);
+    const json = JSON.stringify(payload(sha)).replace('"a":"alpha"', '"a":"\\ud800"');
+    const r = await verify(`# n\n\n<!-- KNOBE_PAYLOAD_START -->\n<script type="application/json">\n${json}\n</script>\n<!-- KNOBE_PAYLOAD_END -->\n`);
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toContain("unpaired surrogate");
+  });
+
   it("treats a missing integrity.sha256 as unreadable, not failed", async () => {
     const p = payload("");
     (p.integrity as Record<string, unknown>).sha256 = undefined;
@@ -221,5 +231,97 @@ describe("input bounds", () => {
     const r = await verify("<!-- KNOBE_PAYLOAD_START -->\n" + "z".repeat(50_000));
     expect(r.state).toBe("unreadable");
     expect(r.reason).toContain("payload markers not found");
+  });
+});
+
+describe("upstream lens.py behavior the port lacked (KnobeOne/knobe-protocol 6132595)", () => {
+  const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
+  const file = (block: string) =>
+    `---\ntitle: "x"\nspec_version: "1.0"\n---\n\nbody\n\n-----BEGIN KNOBE B64-----\n${block}\n-----END KNOBE B64-----\n`;
+  const esc = (cp: number) => "\\u" + cp.toString(16).padStart(4, "0"); // a JSON \uXXXX escape
+  const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+  const ZERO = "0".repeat(64);
+  const MIN = '"spec_version":"1.0","title":"T","summary":"S","content_type":"original",'
+    + '"created_date":"2026-01-02","license":"CC0-1.0","privacy_level":"public",'
+    + '"quarantine_status":"quarantine","attribution":{"sources":[{"author":"A"}]}';
+
+  it("rejects an unpaired surrogate as unreadable, not failed", async () => {
+    const r = await verify(file(b64(`{${MIN},"x":"${esc(0xd800)}","payload_hash":"${ZERO}"}`)));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toBe(
+      "payload contains characters that cannot be UTF-8 encoded (e.g. an unpaired surrogate); rejected");
+    expect(r.payload).toBeNull();
+  });
+
+  it("rejects a float that overflows to infinity, payload_hash included", async () => {
+    for (const json of [`{${MIN},"x":1e400,"payload_hash":"${ZERO}"}`, `{${MIN},"payload_hash":1e400}`]) {
+      const r = await verify(file(b64(json)));
+      expect(r.state).toBe("unreadable");
+      expect(r.reason).toBe("payload contains a non-JSON numeric constant (NaN/Infinity); rejected");
+    }
+  });
+
+  it("strips only ASCII space, tab, CR and LF from a block (ERRATA E12)", async () => {
+    const raw = readFileSync(join(VEC, "minimal-valid.knobe.md"), "utf-8");
+    const inBlock = (s: string) => raw.replace("\n-----END KNOBE B64-----", `${s}\n-----END KNOBE B64-----`);
+    expect((await verify(inBlock(String.fromCharCode(0xa0)))).state).toBe("unreadable"); // NBSP
+    expect((await verify(inBlock(String.fromCharCode(0x85)))).state).toBe("unreadable"); // NEL
+    expect((await verify(inBlock(" \t"))).state).toBe("verified");
+  });
+
+  it("escapes a duplicate key in the reason, as lens.py's safe() does", async () => {
+    const key = `a${esc(0x202e)}${esc(0x1b)}[31mX`;
+    const r = await verify(file(b64(`{"${key}":"1","${key}":"2"}`)));
+    expect(r.reason).toBe("payload contains duplicate JSON key: a\\u202e\\x1b[31mX (ambiguous; rejected)");
+    const lone = await verify(file(b64(`{"${esc(0xd800)}":"1","${esc(0xd800)}":"2"}`)));
+    expect(lone.reason).toBe("payload contains duplicate JSON key: \\ud800 (ambiguous; rejected)");
+  });
+
+  it("reports a duplicate key only when its object closes, as json.loads does", async () => {
+    const r = await verify(file(b64('{"a":"1","a":"2","x":NaN}')));
+    expect(r.reason).toBe("payload contains a non-JSON numeric constant (NaN/Infinity); rejected");
+  });
+
+  it("reports an object-valued spec_version instead of throwing", async () => {
+    const r = await verify(file(b64(`{"spec_version":{"v":"1.0"},"payload_hash":"${ZERO}"}`)));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toBe("unsupported spec_version: {'v': '1.0'}");
+  });
+
+  it("does not drop a byte-order mark at the start of the payload JSON", async () => {
+    const r = await verify(file(b64(String.fromCharCode(0xfeff) + `{${MIN},"payload_hash":"${ZERO}"}`)));
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toBe("payload could not be decoded or parsed");
+  });
+
+  it("hashes bare numbers as Python does: 1.0 stays 1.0, big integers keep every digit", async () => {
+    const canon = '{"x":1.0,"y":12345678901234567890}';
+    const r = await verify(file(b64(`{"x":1.0,"y":12345678901234567890,"payload_hash":"${sha(canon)}"}`)));
+    expect(r.state).toBe("verified");
+    expect(r.computed).toBe(sha(canon));
+  });
+});
+
+describe("seal == verify for numbers a sealer passes as JS numbers", () => {
+  // The sealer hashes a plain object, then writes it with JSON.stringify; the
+  // verifier hashes what it parses back. Both must agree, as lens.py would.
+  const file = (json: string) =>
+    `---\nspec_version: "1.0"\n---\n\n-----BEGIN KNOBE B64-----\n${Buffer.from(json).toString("base64")}\n-----END KNOBE B64-----\n`;
+  for (const n of [0, -0, 7, 1.5, 1e-7, 2 ** 53 + 2, 1.2345678901234568e20, 1e21, 1e300]) {
+    it(`${n}`, async () => {
+      const payload: Record<string, unknown> = { x: n };
+      payload.payload_hash = await payloadHashOf(payload);
+      const r = await verify(file(JSON.stringify(payload)));
+      expect(r.state).toBe("verified");
+    });
+  }
+});
+
+describe("safeLines", () => {
+  it("escapes like safe() on each line, keeps line breaks and does not truncate", () => {
+    const RLO = String.fromCharCode(0x202e), ESC = String.fromCharCode(0x1b);
+    const long = "x".repeat(400);
+    expect(safeLines(`Trusted Source${RLO}\n${ESC}[2Jnext\r\n${long}`))
+      .toBe(`Trusted Source\\u202e\n\\x1b[2Jnext\\x0d\n${long}`);
   });
 });

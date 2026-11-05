@@ -47,7 +47,7 @@ cd obsidian-knobe-lens && npm install && npm run build
 
 | Area | What it does |
 |---|---|
-| Verify | Faithful port of the reference `lens.py`, gated against the 9 published conformance vectors. Reports `verified` / `verified-body-modified` / `failed` / `unreadable` and a conformance level. |
+| Verify | Faithful port of the reference `lens.py` (KnobeOne/knobe-protocol 6132595), gated against the 9 published conformance vectors and a 156-file hostile battery, reasons and issue text included. Reports `verified` / `verified-body-modified` / `failed` / `unreadable` and a conformance level. |
 | Seal | Appends a hash-sealed payload built from frontmatter + settings defaults. Idempotent, so "re-seal on save" never loops. |
 | Save with KNOBE | Ctrl/Cmd+S opens a prompt prefilled from your defaults (or the note's existing seal) — every field editable, including a plain-language **instruction set** for AI/readers — then seals it into the document. Skippable per save, or disable the prompt in Settings → Save behavior. |
 | Trust verdicts | Record a **local** trusted/rejected decision per object, keyed by payload hash. Risk-aware filing warns before trusting body-modified or failed objects. Never written to the file; auto-stale if the file changes. |

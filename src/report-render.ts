@@ -3,7 +3,7 @@
  * No Obsidian imports, so it is unit-testable in isolation.
  */
 
-import { LensResult, Status } from "./lens-core";
+import { LensResult, Status, safe } from "./lens-core";
 import { TrustEntry } from "./trust";
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -13,18 +13,33 @@ const STATUS_LABEL: Record<Status, string> = {
   unreadable: "Unreadable — no valid payload",
 };
 
-function safeMarkdown(v: unknown): string | null {
+const HEX64 = /^[0-9a-f]{64}$/;
+// Longest conformance issue shown. Issues can quote payload keys of any length.
+const ISSUE_LIMIT = 1000;
+
+/** Payload-derived text as inert Markdown on one line. safe() first: control
+ *  characters, line breaks, bidi controls and unpaired surrogates become visible
+ *  escapes, and the text is cut at `limit` characters. Then every ASCII
+ *  punctuation character gets a backslash, which CommonMark and GFM always read
+ *  as a literal, so no code span, table cell, link, image or heading can open;
+ *  this also covers Obsidian's $math$, ==highlight==, [[links]] and #tags.
+ *  `%` becomes an entity instead, so no %%comment%% can hide the rest of the
+ *  report. */
+function safeMarkdown(v: unknown, limit: number | null = 300): string | null {
   if (typeof v !== "string" || !v.trim()) return null;
-  const visibleControls = v.replace(/[\u0000-\u001f\u007f-\u009f]/g, (char) =>
-    `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`,
-  );
-  return visibleControls
-    .replace(/`/g, "\\x60")
-    .replace(/([\\!*_[\]{}<>#+|~-])/g, "\\$1");
+  return safe(v, limit).replace(/[!-/:-@[-`{-~]/g, (c) => (c === "%" ? "&#37;" : "\\" + c));
 }
 
 function bullets(items: string[]): string {
-  return items.length ? items.map((i) => `- ${safeMarkdown(i) ?? "—"}`).join("\n") : "_None._";
+  return items.length ? items.map((i) => `- ${safeMarkdown(i, ISSUE_LIMIT) ?? "—"}`).join("\n") : "_None._";
+}
+
+/** A hash cell. Only a well-formed hash goes in a code span: anything else is
+ *  payload text, so it is escaped like any other. */
+function hashCell(h: string | null): string {
+  if (h === null || h === "") return "—";
+  if (HEX64.test(h)) return `\`${h}\``;
+  return `${safeMarkdown(h) ?? "(blank)"} _(not a 64-character lowercase hex hash)_`;
 }
 
 function attributionLine(payload: Record<string, unknown> | null): string {
@@ -78,8 +93,8 @@ export function buildReportMarkdown(args: {
 
 | | |
 |---|---|
-| Stored \`payload_hash\` | \`${r.stored || "—"}\` |
-| Computed \`payload_hash\` | \`${r.computed || "—"}\` |
+| Stored \`payload_hash\` | ${hashCell(r.stored)} |
+| Computed \`payload_hash\` | ${hashCell(r.computed)} |
 | Match | ${match ? "✅ yes" : "❌ no"} |
 
 ## Conformance issues

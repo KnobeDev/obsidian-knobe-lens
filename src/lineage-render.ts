@@ -1,4 +1,5 @@
 import { LineageGraph } from "./lineage";
+import { safe } from "./lens-core";
 
 const NS = "http://www.w3.org/2000/svg";
 const NODE_W = 150;
@@ -163,7 +164,7 @@ export function renderLineage(
   }
   container.appendChild(svg);
 
-  const titleOf = (h: string) => graph.nodes.find((n) => n.hash === h)?.title ?? h.slice(0, 8);
+  const titleOf = (h: string) => graph.nodes.find((n) => n.hash === h)?.title ?? safe(h, 8);
   const list = container.createEl("ul", { cls: "knobe-lineage-fallback" });
   list.setAttr("aria-label", "Lineage relationships");
   for (const e of graph.edges) list.createEl("li", { text: `${titleOf(e.to)} adapts ${titleOf(e.from)}` });

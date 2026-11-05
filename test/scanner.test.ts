@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { findUnindexedKnobeFiles } from "../src/scanner";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { findUnindexedKnobeFiles, scanVault } from "../src/scanner";
 
 const SEAL = "-----BEGIN KNOBE B64-----\nZm9v\n-----END KNOBE B64-----\n";
 
@@ -58,5 +60,38 @@ describe("findUnindexedKnobeFiles", () => {
     const r = await findUnindexedKnobeFiles(app);
     expect(r.capped).toBe(true);
     expect(r.paths.length).toBe(300); // MAX_DISK_READS
+  });
+});
+
+describe("scanVault display fields", () => {
+  // Crafted files from the lens.py parity battery (test/lens-parity.json).
+  const battery: { cases: { name: string; file_b64: string }[] } = JSON.parse(
+    readFileSync(join(process.cwd(), "test", "lens-parity.json"), "utf-8"));
+  const note = (name: string) =>
+    Buffer.from(battery.cases.find((c) => c.name === name)!.file_b64, "base64").toString("utf-8");
+  const appWith = (files: Record<string, string>) => ({
+    vault: {
+      getMarkdownFiles: () => Object.keys(files).map((path) => ({ path, basename: path.replace(/\.md$/, "") })),
+      cachedRead: async (f: { path: string }) => files[f.path],
+    },
+  }) as any;
+
+  it("escapes bidi and control characters in titles and vocabulary values", async () => {
+    const rows = await scanVault(appWith({
+      "rlo.md": note("x-title-rlo"),
+      "ctl.md": note("x-title-controls"),
+      "vocab.md": note("x-vocab-hostile"),
+    }));
+    const by = (p: string) => rows.find((r) => r.file.path === p)!;
+    expect(by("rlo.md").title).toBe("evil\\u202egnp.exe");
+    expect(by("rlo.md").result.state).toBe("verified");
+    expect(by("ctl.md").title).toBe("a\\x00b\\x1b[31mc\\x85d\\u2028e\\u2066f");
+    expect(by("vocab.md").contentType).toBe("\\u202eevil\\x07");
+  });
+
+  it("lists an object whose spec_version is a JSON object instead of dropping it", async () => {
+    const rows = await scanVault(appWith({ "sv.md": note("x-spec-version-object") }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].result.state).toBe("unreadable");
   });
 });

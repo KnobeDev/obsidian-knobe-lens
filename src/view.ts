@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, Notice, debounce, setIco
 import Sortable from "sortablejs";
 import type KnobeLensPlugin from "./main";
 import { scanVault, ScanRow, findUnindexedKnobeFiles } from "./scanner";
-import { Status, extractBodyText } from "./lens-core";
+import { Status, extractBodyText, safe, safeLines } from "./lens-core";
 import { savedState } from "./saved-state";
 import type { ResealComment } from "./seal";
 import { diagnoseBreak } from "./diagnose";
@@ -946,7 +946,7 @@ export class KnobeLensView extends ItemView {
 
     const det = d.createEl("details");
     det.createEl("summary", { text: "Decoded payload (JSON)" });
-    det.createEl("pre", { cls: "knobe-lens-pre", text: JSON.stringify(p, null, 2) });
+    det.createEl("pre", { cls: "knobe-lens-pre", text: safeLines(JSON.stringify(p, null, 2)) });
 
     const bodyText = extractBodyText(row.raw);
     const bodyWrap = d.createDiv({ cls: "knobe-lens-bodywrap" });
@@ -1187,8 +1187,9 @@ export class KnobeLensView extends ItemView {
   }
 }
 
+/** First 12 characters of a hash for display. A stored hash is payload text. */
 function short(h: string | null): string {
-  return h ? h.slice(0, 12) + "…" : "—";
+  return h ? safe(h, 12) : "—";
 }
 
 /** User-facing message from a thrown value (portfolio ops throw Error). */
@@ -1196,9 +1197,9 @@ function errorMessage(e: unknown): string {
   return e instanceof Error && e.message ? e.message : "Could not complete the move — see the developer console.";
 }
 
+/** A payload field for the detail pane. Payload text: escaped like everywhere else. */
 function renderValue(v: unknown): string {
-  if (typeof v === "string") return v;
-  return JSON.stringify(v);
+  return safeLines(typeof v === "string" ? v : JSON.stringify(v));
 }
 
 function chip(parent: HTMLElement, label: string, value: string, ok: boolean): void {

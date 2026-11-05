@@ -6,6 +6,40 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The verification report note no longer lets payload text change its structure.
+  A crafted `payload_hash` such as ``x` |`` followed by a forged `| Match | ✅ yes |`
+  row and a remote image could close the code span and table, forge the row and
+  embed the image. Only a 64-character hex hash now goes in a code span; every
+  payload-derived value is escaped (all ASCII punctuation, `%` as an entity so no
+  `%%comment%%` can hide the rest) and made visible with `safe()`.
+- Bidi overrides and isolates (U+202A-202E, U+2066-2069), U+2028/2029, C0/C1
+  controls and unpaired surrogates in titles, vocabulary values, stored hashes,
+  parent hashes and reasons are shown as `\uXXXX` / `\xHH` escapes in the
+  dashboard, globe, lineage and report, as the reference verifier's `safe()` does.
+
+### Fixed
+
+- Verification now matches the reference verifier, lens.py at KnobeOne/knobe-protocol
+  6132595 (PR #11, PR #12, ERRATA E12), on every published vector and on a 156-file
+  hostile battery, including reason and issue text (test/lens-parity.test.ts):
+  - an unpaired surrogate (`\ud800`) is unreadable, not failed;
+  - a float that overflows to infinity (`1e400`, also as `payload_hash`) is
+    unreadable, not hashed as `Infinity`;
+  - only ASCII space, tab, CR and LF may wrap a block: NBSP, NEL, VT, FF and
+    U+001C-001F make it unreadable;
+  - bare numbers hash as Python prints them (`1.0`, integers past 2^53 keep every
+    digit), body normalization strips Python's whitespace set, a BOM inside the
+    payload is unreadable, a `body_hash` with the block at byte 0 is unreadable,
+    a `null` spec_version is treated as absent, and a duplicate key is reported
+    when its object closes, as `json.loads` does;
+  - an object-valued `spec_version` no longer throws (the note was dropped from
+    the dashboard); `created_date` years 1-99 are real dates.
+- The test oracle `test/lens.py` is upstream 6132595 (was c7ada1f). The parity
+  fixture was generated with the pending upstream display-escaping fix to
+  lens.py's `safe()` applied; two of its 156 cases depend on that fix.
+
 ## [0.11.0] - 2026-11-03
 
 ### Added
