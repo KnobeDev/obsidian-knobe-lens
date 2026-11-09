@@ -6,6 +6,8 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-08
+
 ### Changed
 
 - The plugin is now named **KNOBE Lens (KnobeDev)**, and its manifest author is
@@ -501,6 +503,7 @@ All notable changes to KNOBE Lens are documented here. The format follows
   fallback. Sealing is keyless (SHA-256 integrity only), with an optional
   re-seal-on-save toggle.
 
+[0.11.1]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.11.1
 [0.11.0]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.11.0
 [0.10.4]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.4
 [0.10.3]: https://github.com/KnobeDev/obsidian-knobe-lens/releases/tag/0.10.3
