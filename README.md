@@ -1,6 +1,6 @@
-# KNOBE Lens
+# KNOBE Lens (KnobeDev)
 
-An Obsidian plugin to **verify, inspect, and seal** [KNOBE Protocol v1](https://knobe.org) knowledge objects directly in your vault.
+An Obsidian plugin, maintained by KnobeDev, to **verify, inspect, and seal** [KNOBE Protocol v1](https://knobe.org) knowledge objects directly in your vault. It is separate from the browser Lens at [knobe.org/lens](https://knobe.org/lens).
 
 KNOBE keeps a document's interpretive context — attribution, transformations, fidelity limits, use conditions, and accessibility lineage — inside the file, in plain text, hash-sealed. This plugin is both halves of the toolchain:
 
@@ -25,7 +25,7 @@ A KNOBE is **any Markdown note carrying a seal block** (`-----BEGIN KNOBE B64---
 
 1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin.
 2. BRAT → **Add beta plugin** → `https://github.com/KnobeDev/obsidian-knobe-lens`.
-3. Enable **KNOBE Lens** under Settings → Community plugins.
+3. Enable **KNOBE Lens (KnobeDev)** under Settings → Community plugins.
 
 BRAT installs the latest GitHub release and keeps it updated.
 

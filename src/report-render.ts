@@ -119,6 +119,6 @@ ${attributionLine(p)}
 ${verdict ? `**${verdict.verdict}**${verdict.note ? ` — ${safeMarkdown(verdict.note)}` : ""} _(recorded ${safeMarkdown(verdict.at)})_` : "_No local verdict recorded._"}
 
 ---
-> **Integrity is not truth.** A verified seal proves the payload is byte-intact — not that the content is true, safe, or cleared. Inspect quarantined objects before trusting. Report generated locally by KNOBE Lens.
+> **Integrity is not truth.** A verified seal proves the payload is byte-intact — not that the content is true, safe, or cleared. Inspect quarantined objects before trusting. Report generated locally by KNOBE Lens (KnobeDev).
 `;
 }

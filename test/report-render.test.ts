@@ -42,6 +42,16 @@ describe("buildReportMarkdown", () => {
     expect(md).toContain("Integrity is not truth");
   });
 
+  it("names this plugin, not the steward's browser Lens, as the report's source", () => {
+    const md = buildReportMarkdown({
+      file: { basename: "Sample", path: "KNOBE samples/Sample.knobe.md" },
+      result: verified,
+      verdict: null,
+      generatedAt: "2026-06-29T12:00:00.000Z",
+    });
+    expect(md).toContain("Report generated locally by KNOBE Lens (KnobeDev).");
+  });
+
   it("flags a failed seal, lists conformance issues + missing fields, and shows the local verdict", () => {
     const failed: LensResult = {
       ...verified,
