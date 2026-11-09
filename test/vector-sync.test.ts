@@ -9,36 +9,48 @@
  * three things at once: (1) each bundled vector is byte-identical to upstream, (2) the two
  * sets are complete (no missing/extra), and (3) this plugin's verify() reproduces the nine
  * official verdicts on the UPSTREAM files directly — not just on its own bundled copy.
+ * It also locks the upstream adversarial set (complete, every verdict) on all three
+ * fields: status, body_verified and conformance.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { verify } from "../src/lens-core";
 
-// The nine official (status, conformance) verdicts, transcribed from the upstream
-// test-vectors/README.md table. This is the source of truth the plugin is locked to.
-const OFFICIAL: Record<string, { state: string; conformance: string }> = {
-  "minimal-valid.knobe.md": { state: "verified", conformance: "valid" },
-  "full-valid.knobe.md": { state: "verified", conformance: "valid" },
-  "body-modified.knobe.md": { state: "verified-body-modified", conformance: "valid" },
-  "payload-modified.knobe.md": { state: "failed", conformance: "valid" },
-  "unreadable.knobe.md": { state: "unreadable", conformance: "invalid" },
-  "unicode-valid.knobe.md": { state: "verified", conformance: "valid" },
-  "numeric-violation.knobe.md": { state: "verified", conformance: "invalid" },
-  "omitted-body-hash.knobe.md": { state: "verified", conformance: "valid" },
-  "multi-block.knobe.md": { state: "verified", conformance: "warnings" },
+// The nine official (status, body_verified, conformance) verdicts, transcribed from the
+// upstream test-vectors/README.md table (body_verified column added in knobe-protocol
+// PR #30). This is the source of truth the plugin is locked to. An unreadable file's
+// body_verified ("—" in the table) is reported as the mandated "omitted" (erratum E11).
+const OFFICIAL: Record<string, { state: string; bodyVerified: string; conformance: string }> = {
+  "minimal-valid.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
+  "full-valid.knobe.md": { state: "verified", bodyVerified: "yes", conformance: "valid" },
+  "body-modified.knobe.md": { state: "verified-body-modified", bodyVerified: "modified", conformance: "valid" },
+  "payload-modified.knobe.md": { state: "failed", bodyVerified: "omitted", conformance: "valid" },
+  "unreadable.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
+  "unicode-valid.knobe.md": { state: "verified", bodyVerified: "yes", conformance: "valid" },
+  "numeric-violation.knobe.md": { state: "verified", bodyVerified: "yes", conformance: "invalid" },
+  "omitted-body-hash.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
+  "multi-block.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "warnings" },
 };
 
+// Transcribed from upstream test-vectors/adversarial/README.md.
 const ADVERSARIAL: Record<string, { state: string; bodyVerified: string; conformance: string }> = {
   "bad-attribution-sources-type.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
   "bad-body-hash-format.knobe.md": { state: "verified-body-modified", bodyVerified: "modified", conformance: "invalid" },
   "bad-created-date.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
+  "bidi-title.knobe.md": { state: "failed", bodyVerified: "omitted", conformance: "invalid" },
+  "bigint-payload.knobe.md": { state: "failed", bodyVerified: "omitted", conformance: "invalid" },
   "control-character-title.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
   "duplicate-key.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
+  "float-overflow.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
+  "lone-surrogate.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
   "multi-block-warning.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "warnings" },
+  "nested-payload-hash.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
   "nfc-key-collision.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
   "no-frontmatter-valid-payload.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
+  "null-payload-hash.knobe.md": { state: "failed", bodyVerified: "omitted", conformance: "invalid" },
   "payload-array.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
+  "spec-version-array.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
   "unsupported-spec-version.knobe.md": { state: "unreadable", bodyVerified: "omitted", conformance: "invalid" },
 };
 
@@ -90,9 +102,17 @@ describe(
         const raw = readFileSync(join(UPSTREAM as string, name), "utf-8");
         const r = await verify(raw);
         expect(r.state).toBe(OFFICIAL[name].state);
+        expect(r.bodyVerified).toBe(OFFICIAL[name].bodyVerified);
         expect(r.conformance).toBe(OFFICIAL[name].conformance);
       });
     }
+
+    it("upstream ships exactly the adversarial vectors we lock against (no drift in the set)", () => {
+      const upstreamAdversarial = readdirSync(join(UPSTREAM as string, "adversarial"))
+        .filter((f) => f.endsWith(".knobe.md"))
+        .sort();
+      expect(upstreamAdversarial).toEqual(Object.keys(ADVERSARIAL).sort());
+    });
 
     for (const [name, expected] of Object.entries(ADVERSARIAL)) {
       it(`adversarial/${name}: verify() matches the upstream hardening verdict`, async () => {

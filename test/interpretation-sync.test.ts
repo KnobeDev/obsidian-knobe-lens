@@ -1,8 +1,8 @@
 /**
  * ERRATA drift guard: the upstream interpretation vectors pin rulings on
- * questions the v1 specification text left open (ERRATA.md E2, E5–E9). They
+ * questions the v1 specification text left open (ERRATA.md E2, E5–E9, E12). They
  * are not part of the nine-vector compatibility bar, but a verifier that
- * matches the reference on all six follows the published rulings. Runs
+ * matches the reference on all seven follows the published rulings. Runs
  * against the upstream files directly, so a new or revised ruling fails here
  * until this plugin is updated.
  */
@@ -21,6 +21,7 @@ const INTERPRETATION: Record<string, { state: string; bodyVerified: string | nul
   "base64-unpadded.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
   "attribution-missing.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "invalid" },
   "astral-unicode-literal.knobe.md": { state: "verified", bodyVerified: "omitted", conformance: "valid" },
+  "nel-block-whitespace.knobe.md": { state: "unreadable", bodyVerified: null, conformance: "invalid" },
 };
 
 function resolveInterpretationDir(): string | null {
@@ -48,7 +49,7 @@ if (!DIR) {
 const load = (name: string): string => readFileSync(join(DIR as string, name), "utf-8");
 
 describe("lens-core follows the ERRATA rulings pinned by the interpretation vectors", () => {
-  it("upstream ships exactly the six rulings we lock against", () => {
+  it("upstream ships exactly the seven rulings we lock against", () => {
     const files = readdirSync(DIR as string).filter((f) => f.endsWith(".knobe.md")).sort();
     expect(files).toEqual(Object.keys(INTERPRETATION).sort());
   });
