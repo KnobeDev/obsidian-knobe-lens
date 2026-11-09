@@ -1,9 +1,14 @@
 /**
  * lens-core.ts — KNOBE Protocol v1 verifier.
  *
- * A faithful TypeScript port of the reference verifier lens.py (knobe.org/lens.py).
- * Behavior is gated against lens.py's own output on the 9 published conformance
- * vectors — see test/lens-core.test.ts and test/expected.json.
+ * A faithful TypeScript port of the reference verifier lens.py (knobe.org/lens.py),
+ * in step with KnobeOne/knobe-protocol main 6132595 (PR #11 hostile input,
+ * PR #12 and ERRATA E12) and with the display escaping of the pending upstream
+ * safe() fix. Every verdict, hash, reason and conformance issue is gated against
+ * lens.py's own output on the published vectors (test/lens-core.test.ts) and on a
+ * battery of crafted files (test/lens-parity.test.ts), which also pins the two
+ * places this port deliberately differs: CR-tolerant block markers, and
+ * frontmatter that must declare spec_version (spec §3.1).
  *
  * Integrity, not truth: a `verified` status proves only that the sealed payload
  * is byte-intact. It does not prove the content is true, safe, or appropriate.
@@ -13,6 +18,11 @@
  * sorted (by code point), no whitespace, arrays in order, literal UTF-8, SHA-256.
  */
 
+import {
+  PyFloat, PyValue, PyDict, isDict, pyTypeName, pyTruthy, pyStrRepr, pyRepr, pyStr, toPlain,
+  hex, DuplicateKeyError, NonJSONConstantError, parseStrictJson, canonical,
+} from "./pyjson";
+
 export type Status = "verified" | "verified-body-modified" | "failed" | "unreadable";
 export type Conformance = "valid" | "warnings" | "invalid";
 export type BodyVerified = "yes" | "modified" | "omitted";
@@ -20,12 +30,17 @@ export type BodyVerified = "yes" | "modified" | "omitted";
 export interface LensResult {
   state: Status;
   computed: string | null;
+  /** The sealed payload_hash: the string itself, "" when absent, null when the
+   *  payload has none to report (unreadable, or JSON null). Any other JSON value
+   *  is given as Python's str() of it, as lens.py prints it. Raw payload text:
+   *  pass it through safe() before display. */
   stored: string | null;
   payload: Record<string, unknown> | null;
   missing: string[];
   body: "match" | "mismatch" | null;
   bodyVerified: BodyVerified;
   conformance: Conformance;
+  /** lens.py's issue text. Parts may quote payload keys: display through safe(). */
   conformanceIssues: string[];
   multipleBlocks: boolean;
   blockCount: number;
@@ -34,7 +49,7 @@ export interface LensResult {
 
 // A v1 lens must not guess how another protocol version is canonicalized or
 // interpreted. Version gating happens before hashing, matching reference lens.py.
-const SUPPORTED_SPEC_VERSIONS = new Set<unknown>(["1.0"]);
+const SUPPORTED_SPEC_VERSIONS = new Set<string>(["1.0"]);
 
 export const REQUIRED = ["spec_version", "title", "summary", "content_type", "created_date",
   "license", "privacy_level", "quarantine_status", "attribution", "payload_hash"];
@@ -50,7 +65,8 @@ export const CANONICAL_VOCAB: Record<string, Set<string>> = {
   identity_status: new Set(["declared", "signed"]),
 };
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+// ASCII digits and hex only, nothing following (ERRATA E12).
+const ISO_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 
 // Upper bound on the note size we'll attempt to verify (1 MB). Sealed KNOBE
@@ -64,8 +80,8 @@ export const KNOBE_END_B64 = "-----END KNOBE B64-----";
 
 // Block matching tolerates CR (`\r\n` and the doubled `\r\r\n` some exporters
 // emit): every `\r*` matches the empty string on pure-LF input, so the 9
-// reference vectors are byte-for-byte unaffected. The base64 body itself has all
-// whitespace stripped before decode, so stray CR inside the payload is moot.
+// reference vectors are byte-for-byte unaffected. lens.py matches LF only and
+// reports such a file unreadable; test/lens-parity.test.ts pins the difference.
 const BLOCK_RE = /(?:^|\r*\n)-----BEGIN KNOBE B64-----\r*\n([\s\S]*?)\r*\n-----END KNOBE B64-----/g;
 // Legacy/non-B64 marker (older or newer spec variants). Detected ONLY to surface
 // such objects in the dashboard with a reason — never accepted as a sealed block.
@@ -101,148 +117,39 @@ function lastBodyMarkerStart(raw: string): number {
   return idx;
 }
 
-class DuplicateKeyError extends Error {}
-
 const isObj = (x: unknown): x is Record<string, unknown> =>
   x !== null && typeof x === "object" && !Array.isArray(x);
 
-/* ---- strict JSON parse: rejects duplicate keys + NaN/Infinity (spec §5) ---- */
-
-function parseStrictJson(text: string): unknown {
-  let i = 0;
-  const n = text.length;
-  const isWs = (c: string) => c === " " || c === "\t" || c === "\n" || c === "\r";
-  const ws = () => { while (i < n && isWs(text[i])) i++; };
-  const numRe = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
-
-  function parseString(): string {
-    i++; // opening quote
-    let out = "";
-    for (;;) {
-      if (i >= n) throw new SyntaxError("unterminated string");
-      const c = text[i++];
-      if (c === '"') return out;
-      if (c === "\\") {
-        const e = text[i++];
-        if (e === '"') out += '"';
-        else if (e === "\\") out += "\\";
-        else if (e === "/") out += "/";
-        else if (e === "b") out += "\b";
-        else if (e === "f") out += "\f";
-        else if (e === "n") out += "\n";
-        else if (e === "r") out += "\r";
-        else if (e === "t") out += "\t";
-        else if (e === "u") {
-          const hex = text.slice(i, i + 4);
-          if (!/^[0-9a-fA-F]{4}$/.test(hex)) throw new SyntaxError("bad unicode escape");
-          out += String.fromCharCode(parseInt(hex, 16));
-          i += 4;
-        } else throw new SyntaxError("bad escape");
-      } else if (c.charCodeAt(0) < 0x20) {
-        throw new SyntaxError("control character in string");
-      } else out += c;
-    }
+/**
+ * Render a (possibly payload-derived) value safely for display: escape C0/C1
+ * control characters and DEL (so a crafted string cannot spoof a report or
+ * inject terminal escape sequences), bidi overrides and isolates and line and
+ * paragraph separators (U+202A-202E, U+2066-2069, U+2028/2029, which can
+ * visually reorder text), and unpaired surrogates (which have no UTF-8 form).
+ * Port of lens.py safe() with the pending upstream display-escaping fix, and of
+ * knobe-core.js safe(). `limit` counts code points, as Python's len() does;
+ * null keeps the whole text. Non-strings are shown as JSON.
+ */
+export function safe(value: unknown, limit: number | null = 300): string {
+  if (typeof value !== "string") {
+    let s: string | undefined;
+    try { s = JSON.stringify(value); } catch { /* BigInt or a cycle */ }
+    return safe(s ?? String(typeof value === "bigint" ? value : typeof value), limit);
   }
-  // null-prototype objects: a "__proto__" key becomes an ordinary own property
-  // (so it is hashed and the seal correctly fails), not a prototype mutation —
-  // this closes a body-hash bypass via prototype pollution.
-  function parseObject(depth: number): Record<string, unknown> {
-    i++; // {
-    const obj: Record<string, unknown> = Object.create(null);
-    const seen = new Set<string>();
-    ws();
-    if (text[i] === "}") { i++; return obj; }
-    for (;;) {
-      ws();
-      if (text[i] !== '"') throw new SyntaxError("expected object key");
-      const key = parseString();
-      if (seen.has(key)) throw new DuplicateKeyError(key);
-      seen.add(key);
-      ws();
-      if (text[i] !== ":") throw new SyntaxError("expected ':'");
-      i++;
-      obj[key] = parseValue(depth + 1);
-      ws();
-      const ch = text[i];
-      if (ch === ",") { i++; continue; }
-      if (ch === "}") { i++; return obj; }
-      throw new SyntaxError("expected ',' or '}'");
-    }
+  const out: string[] = [];
+  for (const ch of value) {
+    const o = ch.codePointAt(0) as number;
+    if (o < 0x20 || o === 0x7f || (o >= 0x80 && o <= 0x9f)) out.push("\\x" + hex(o, 2));
+    else if ((o >= 0x202a && o <= 0x202e) || (o >= 0x2066 && o <= 0x2069) || o === 0x2028
+      || o === 0x2029 || (o >= 0xd800 && o <= 0xdfff)) out.push("\\u" + hex(o, 4));
+    else out.push(ch);
   }
-  function parseArray(depth: number): unknown[] {
-    i++; // [
-    const arr: unknown[] = [];
-    ws();
-    if (text[i] === "]") { i++; return arr; }
-    for (;;) {
-      arr.push(parseValue(depth + 1));
-      ws();
-      const ch = text[i];
-      if (ch === ",") { i++; continue; }
-      if (ch === "]") { i++; return arr; }
-      throw new SyntaxError("expected ',' or ']'");
-    }
-  }
-  function parseValue(depth: number): unknown {
-    if (depth > 256) throw new SyntaxError("JSON nesting too deep"); // DoS guard
-    ws();
-    if (i >= n) throw new SyntaxError("unexpected end of input");
-    const c = text[i];
-    if (c === "{") return parseObject(depth);
-    if (c === "[") return parseArray(depth);
-    if (c === '"') return parseString();
-    if (c === "-" || (c >= "0" && c <= "9")) {
-      numRe.lastIndex = i;
-      const m = numRe.exec(text);
-      if (!m || m.index !== i) throw new SyntaxError("bad number");
-      i += m[0].length;
-      return Number(m[0]);
-    }
-    if (text.startsWith("true", i)) { i += 4; return true; }
-    if (text.startsWith("false", i)) { i += 5; return false; }
-    if (text.startsWith("null", i)) { i += 4; return null; }
-    throw new SyntaxError("unexpected token"); // rejects NaN / Infinity
-  }
-
-  const value = parseValue(0);
-  ws();
-  if (i !== n) throw new SyntaxError("trailing content after JSON value");
-  return value;
+  return limit !== null && out.length > limit ? out.slice(0, limit).join("") + "…" : out.join("");
 }
 
-/* ---- canonicalization (spec §5) ---- */
-
-function nfcNormalize(x: unknown): unknown {
-  if (typeof x === "string") return x.normalize("NFC");
-  if (Array.isArray(x)) return x.map(nfcNormalize);
-  if (isObj(x)) {
-    const out: Record<string, unknown> = Object.create(null);
-    for (const k of Object.keys(x)) out[k.normalize("NFC")] = nfcNormalize(x[k]);
-    return out;
-  }
-  return x;
-}
-
-function cmpCodePoint(a: string, b: string): number {
-  const ai = Array.from(a), bi = Array.from(b);
-  const len = Math.min(ai.length, bi.length);
-  for (let k = 0; k < len; k++) {
-    const d = (ai[k].codePointAt(0) as number) - (bi[k].codePointAt(0) as number);
-    if (d !== 0) return d;
-  }
-  return ai.length - bi.length;
-}
-
-function canonical(x: unknown): string {
-  if (x === null) return "null";
-  if (typeof x === "boolean") return x ? "true" : "false";
-  if (typeof x === "number") return String(x); // payload numerics SHOULD be strings (§5)
-  if (typeof x === "string") return JSON.stringify(x); // matches Python json ensure_ascii=False
-  if (Array.isArray(x)) return "[" + x.map(canonical).join(",") + "]";
-  const obj = x as Record<string, unknown>;
-  const keys = Object.keys(obj).sort(cmpCodePoint);
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonical(obj[k])).join(",") + "}";
-}
+/** Multi-line payload text for display: safe() on each line, line breaks kept,
+ *  nothing cut. For panes that show a whole value (a summary, a JSON dump). */
+export const safeLines = (text: string): string => text.split("\n").map((l) => safe(l, null)).join("\n");
 
 async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
@@ -250,8 +157,10 @@ async function sha256Hex(input: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** lens.py: base64.b64decode(re.sub(r"[ \t\r\n]", "", block), validate=True).
+ *  Only ASCII space, tab, CR and LF may wrap a block (ERRATA E12). */
 function decodeBase64Strict(b64: string): Uint8Array {
-  const compact = b64.replace(/\s+/g, "");
+  const compact = b64.replace(/[ \t\r\n]+/g, "");
   if (compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(compact)) {
     throw new Error("invalid base64");
   }
@@ -261,11 +170,29 @@ function decodeBase64Strict(b64: string): Uint8Array {
   return bytes;
 }
 
+/** Strict UTF-8, keeping a leading BOM (which then fails the JSON parse, as in
+ *  lens.py) rather than silently dropping it. */
+const decodeUtf8 = (bytes: Uint8Array): string =>
+  new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+
 /* ---- body normalization (spec, optional body_hash) ---- */
 
+// Python's str.isspace() set, which str.strip() and re's \s use. It differs from
+// JS trim() and \s: it has U+001C-001F and U+0085, and lacks U+FEFF.
+const PY_SPACE = new Set([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85,
+  0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+  0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000]);
+const PY_WS = "[" + [...PY_SPACE].map((c) => "\\u" + hex(c, 4)).join("") + "]";
+
+function pyStrip(s: string): string {
+  let a = 0, b = s.length;
+  while (a < b && PY_SPACE.has(s.charCodeAt(a))) a++;
+  while (b > a && PY_SPACE.has(s.charCodeAt(b - 1))) b--;
+  return s.slice(a, b);
+}
+
 function normalizeBody(text: string): string {
-  const stripped = text.trim();
-  const lf = stripped.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lf = pyStrip(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return lf.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n");
 }
 
@@ -275,137 +202,162 @@ function findBodyStart(pre: string): number | null {
   for (;;) {
     const nl = pre.indexOf("\n", idx);
     const line = nl !== -1 ? pre.slice(idx, nl) : pre.slice(idx);
-    if (line.replace(/\r$/, "") === "---") return nl !== -1 ? nl + 1 : pre.length;
+    if (line.replace(/\r+$/, "") === "---") return nl !== -1 ? nl + 1 : pre.length;
     if (nl === -1) return null;
     idx = nl + 1;
   }
 }
 
+// lens.py: re.match(r'\s*spec_version\s*:\s*(.+?)\s*$', line), with Python's \s.
+const FM_SPEC_RE = new RegExp(`^${PY_WS}*spec_version${PY_WS}*:${PY_WS}*([^\\n]+?)${PY_WS}*$`);
+
+/** lens.py parse_frontmatter(), plus spec §3.1: a frontmatter block that never
+ *  declares spec_version is reported (lens.py accepts it). */
 function parseFrontmatter(raw: string): { ok: boolean; spec: string | null; reason: string | null } {
-  let r = raw;
-  if (r.charCodeAt(0) === 0xfeff) r = r.slice(1);
-  const lines = r.split("\n");
-  if (lines.length === 0 || lines[0].replace(/\r$/, "") !== "---") {
+  const lines = (raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw).split("\n");
+  if (lines[0].replace(/\r+$/, "") !== "---") {
     return { ok: false, spec: null, reason: "missing opening '---' frontmatter delimiter" };
   }
   let spec: string | null = null;
   for (let k = 1; k < lines.length; k++) {
-    const ln = lines[k].replace(/\r$/, "");
+    const ln = lines[k].replace(/\r+$/, "");
     if (ln === "---") {
       return spec === null
         ? { ok: false, spec: null, reason: "missing required spec_version" }
         : { ok: true, spec, reason: null };
     }
-    const m = ln.match(/^\s*spec_version\s*:\s*(.+?)\s*$/);
-    if (m && spec === null) spec = m[1].trim().replace(/^["']/, "").replace(/["']$/, "");
+    const m = ln.match(FM_SPEC_RE);
+    if (m && spec === null) spec = pyStrip(m[1]).replace(/^["']+/, "").replace(/["']+$/, "");
   }
   return { ok: false, spec, reason: "missing closing '---' frontmatter delimiter" };
 }
 
-/* ---- structural scans ---- */
+/* ---- structural scans (ports of lens.py's, on the parsed payload) ---- */
 
-function findNfcCollisions(x: unknown): string[] {
-  const out: string[] = [];
-  if (isObj(x)) {
-    const map = new Map<string, string>();
-    for (const k of Object.keys(x)) {
-      const nk = k.normalize("NFC");
-      if (map.has(nk) && map.get(nk) !== k) out.push(`${k} collides with ${map.get(nk)} under NFC`);
-      else if (!map.has(nk)) map.set(nk, k);
+function hasLoneSurrogate(x: PyValue | string): boolean {
+  if (typeof x === "string") {
+    for (let k = 0; k < x.length; k++) {
+      const c = x.charCodeAt(k);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const d = x.charCodeAt(k + 1);
+        if (d >= 0xdc00 && d <= 0xdfff) { k++; continue; }
+        return true;
+      }
+      if (c >= 0xdc00 && c <= 0xdfff) return true;
     }
-    for (const k of Object.keys(x)) out.push(...findNfcCollisions(x[k]));
+    return false;
+  }
+  if (Array.isArray(x)) return x.some(hasLoneSurrogate);
+  if (isDict(x)) for (const [k, v] of x) if (hasLoneSurrogate(k) || hasLoneSurrogate(v)) return true;
+  return false;
+}
+
+function findNfcCollisions(x: PyValue, path = ""): string[] {
+  const out: string[] = [];
+  if (isDict(x)) {
+    const normToOrig = new Map<string, string>();
+    for (const k of x.keys()) {
+      const nk = k.normalize("NFC");
+      const prior = normToOrig.get(nk);
+      if (prior !== undefined && prior !== k) {
+        out.push(`${pyStrRepr(path ? `${path}.${k}` : k)} collides with ${pyStrRepr(prior)} under NFC`);
+      } else if (prior === undefined) normToOrig.set(nk, k);
+    }
+    for (const [k, v] of x) out.push(...findNfcCollisions(v, path ? `${path}.${k}` : k));
   } else if (Array.isArray(x)) {
-    for (const v of x) out.push(...findNfcCollisions(v));
+    x.forEach((v, idx) => out.push(...findNfcCollisions(v, `${path}[${idx}]`)));
   }
   return out;
 }
 
-function findNumericPaths(x: unknown, path = ""): string[] {
+function findNumericPaths(x: PyValue, path = ""): string[] {
   const out: string[] = [];
-  if (typeof x === "boolean") return out;
-  if (typeof x === "number") { out.push(path); return out; }
-  if (Array.isArray(x)) x.forEach((v, idx) => out.push(...findNumericPaths(v, `${path}[${idx}]`)));
-  else if (isObj(x)) for (const k of Object.keys(x)) out.push(...findNumericPaths(x[k], path ? `${path}.${k}` : k));
+  if (typeof x === "number" || typeof x === "bigint" || x instanceof PyFloat) out.push(path);
+  else if (Array.isArray(x)) x.forEach((v, idx) => out.push(...findNumericPaths(v, `${path}[${idx}]`)));
+  else if (isDict(x)) for (const [k, v] of x) out.push(...findNumericPaths(v, path ? `${path}.${k}` : k));
   return out;
 }
 
+/** datetime.date.fromisoformat() on an ISO_DATE-shaped string. */
 function isRealCalendarDate(s: string): boolean {
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return false;
-  const y = +m[1], mo = +m[2], d = +m[3];
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
-  const dt = new Date(Date.UTC(y, mo - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+  const y = +s.slice(0, 4), mo = +s.slice(5, 7), d = +s.slice(8, 10);
+  if (y < 1 || mo < 1 || mo > 12 || d < 1) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  return d <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
 }
 
+/** lens.py check_conformance(), in its order and wording. */
 function checkConformance(
-  payload: Record<string, unknown>, missing: string[],
+  payload: PyDict, missing: string[],
   fmOk: boolean, fmReason: string | null, fmSpec: string | null, blockCount: number,
 ): { level: Conformance; issues: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const get = (k: string): PyValue | null => (payload.has(k) ? (payload.get(k) as PyValue) : null);
 
   if (!fmOk) {
     errors.push(fmReason === "missing required spec_version"
       ? "YAML frontmatter missing required spec_version"
       : `YAML frontmatter missing or malformed: ${fmReason}`);
-  }
-  else if (fmSpec !== null && typeof payload.spec_version === "string" && fmSpec !== payload.spec_version) {
-    warnings.push(`frontmatter spec_version '${fmSpec}' does not match sealed payload spec_version '${payload.spec_version}'`);
+  } else {
+    const sv = get("spec_version");
+    if (fmSpec !== null && typeof sv === "string" && fmSpec !== sv) {
+      warnings.push(`frontmatter spec_version ${pyStrRepr(fmSpec)} does not match sealed payload spec_version ${pyStrRepr(sv)}`);
+    }
   }
 
   for (const mm of missing) errors.push(`required field missing: ${mm}`);
 
   for (const field of STRING_FIELDS) {
-    if (field in payload && typeof payload[field] !== "string") {
-      errors.push(`required field ${field} must be a string, got ${typeof payload[field]}`);
+    const v = get(field);
+    if (payload.has(field) && typeof v !== "string") {
+      errors.push(`required field ${field} must be a string, got ${pyTypeName(v)}`);
     }
   }
 
-  const att = payload.attribution;
-  if (att !== undefined) {
-    if (!isObj(att)) errors.push(`attribution must be an object`);
+  const att = get("attribution");
+  if (att !== null) {
+    if (!isDict(att)) errors.push(`attribution must be an object, got ${pyTypeName(att)}`);
     else {
-      const src = att.sources;
-      if (src !== undefined && !Array.isArray(src)) errors.push(`attribution.sources must be an array`);
-      else if (Array.isArray(src) && src.length === 0) errors.push(`attribution.sources must be a non-empty array`);
+      const src = att.has("sources") ? (att.get("sources") as PyValue) : null;
+      if (src !== null && !Array.isArray(src)) errors.push(`attribution.sources must be an array, got ${pyTypeName(src)}`);
+      else if (Array.isArray(src) && src.length === 0) errors.push("attribution.sources must be a non-empty array");
     }
   }
 
-  const ph = payload.payload_hash;
-  if (ph !== undefined && !(typeof ph === "string" && HEX64.test(ph))) errors.push(`payload_hash format invalid (must be 64 lowercase hex)`);
-  const bh = payload.body_hash;
-  if (bh !== undefined && !(typeof bh === "string" && HEX64.test(bh))) errors.push(`body_hash format invalid (must be 64 lowercase hex)`);
+  const ph = get("payload_hash");
+  if (ph !== null && !(typeof ph === "string" && HEX64.test(ph))) errors.push("payload_hash format invalid (must be 64 lowercase hex)");
+  const bh = get("body_hash");
+  if (bh !== null && !(typeof bh === "string" && HEX64.test(bh))) errors.push("body_hash format invalid (must be 64 lowercase hex)");
 
-  const cd = payload.created_date;
-  if (cd !== undefined) {
-    if (!(typeof cd === "string" && ISO_DATE.test(cd))) errors.push(`created_date is not in YYYY-MM-DD form`);
-    else if (!isRealCalendarDate(cd)) errors.push(`created_date is not a real calendar date`);
+  const cd = get("created_date");
+  if (cd !== null) {
+    if (!(typeof cd === "string" && ISO_DATE.test(cd))) errors.push(`created_date is not in YYYY-MM-DD form: ${pyRepr(cd)}`);
+    else if (!isRealCalendarDate(cd)) errors.push(`created_date is not a real calendar date: ${pyRepr(cd)}`);
   }
 
-  const scan: Record<string, unknown> = Object.create(null);
-  for (const k of Object.keys(payload)) if (k !== "payload_hash") scan[k] = payload[k];
+  const scan: PyDict = new Map([...payload].filter(([k]) => k !== "payload_hash"));
   const nums = findNumericPaths(scan);
   if (nums.length) {
     const shown = nums.length <= 5 ? nums : [...nums.slice(0, 5), "..."];
     errors.push(`bare numeric value(s) in payload (spec §5 requires strings): ${shown.join(", ")}`);
   }
 
-  const parents = Array.isArray(payload.parents) ? payload.parents : [];
-  parents.forEach((p, idx) => {
-    if (isObj(p) && "payload_hash" in p) {
-      const pph = p.payload_hash;
-      if (typeof pph !== "string" || !HEX64.test(pph)) errors.push(`parents[${idx}].payload_hash format invalid`);
+  const parents = get("parents");
+  (Array.isArray(parents) ? parents : []).forEach((p, idx) => {
+    if (isDict(p) && p.has("payload_hash")) {
+      const pph = p.get("payload_hash");
+      if (typeof pph !== "string" || !HEX64.test(pph)) errors.push(`parents[${idx}].payload_hash format invalid (must be 64 lowercase hex)`);
     }
   });
 
   if (blockCount > 1) warnings.push(`multiple payload blocks present (${blockCount}); evaluated block ${blockCount} of ${blockCount} per spec §3.3`);
 
   for (const field of Object.keys(CANONICAL_VOCAB)) {
-    const v = payload[field];
+    const v = get(field);
     if (typeof v !== "string" || CANONICAL_VOCAB[field].has(v)) continue;
     if (!v.includes(":") && !v.startsWith("ext-")) {
-      warnings.push(`${field}: '${v}' is a custom vocabulary value without namespace prefix`);
+      warnings.push(`${field}: ${pyStrRepr(v)} is a custom vocabulary value without namespace prefix (recommend 'ext-' or 'domain:' per §8)`);
     }
   }
 
@@ -414,10 +366,11 @@ function checkConformance(
   return { level: "valid", issues: [] };
 }
 
-function unreadable(reason: string, blockCount: number, payload: Record<string, unknown> | null = null): LensResult {
+function unreadable(reason: string, blockCount: number, payload: Record<string, unknown> | null = null,
+  issues: string[] = [reason]): LensResult {
   return {
     state: "unreadable", computed: null, stored: null, payload, missing: [],
-    body: null, bodyVerified: "omitted", conformance: "invalid", conformanceIssues: [reason],
+    body: null, bodyVerified: "omitted", conformance: "invalid", conformanceIssues: issues,
     multipleBlocks: blockCount > 1, blockCount, reason,
   };
 }
@@ -428,7 +381,7 @@ function unreadable(reason: string, blockCount: number, payload: Record<string, 
 export async function payloadHashOf(payload: Record<string, unknown>): Promise<string> {
   const obj: Record<string, unknown> = Object.create(null);
   for (const k of Object.keys(payload)) if (k !== "payload_hash") obj[k] = payload[k];
-  return sha256Hex(canonical(nfcNormalize(obj)));
+  return sha256Hex(canonical(obj));
 }
 
 /** Normalized body hash (optional body_hash field). With applyNfc, additionally
@@ -448,6 +401,11 @@ export function extractBodyText(raw: string): string | null {
   const pre = raw.slice(0, markerIdx);
   const start = findBodyStart(pre);
   return start === null ? null : pre.slice(start);
+}
+
+/** Parse JSON strictly into plain values (null-prototype objects, numbers). */
+function parsePlainJson(text: string): unknown {
+  return toPlain(parseStrictJson(text));
 }
 
 /* ---- KNOBE.AI HTML-comment envelope (knobe_version 0.1) ---- */
@@ -472,8 +430,8 @@ async function claimFieldsJoinHash(payload: Record<string, unknown>): Promise<Ha
   for (const name of integ.claim_fields) {
     if (typeof name !== "string") return { error: "claim_fields contains a non-string name" };
     const v = fields[name];
-    if (typeof v !== "string") return { error: `claim field '${name}' is missing or not a string` };
-    if (v.includes(CLAIM_JOIN_SEP)) return { error: `claim field '${name}' contains the join separator — ambiguous preimage, cannot verify safely` };
+    if (typeof v !== "string") return { error: `claim field '${safe(name)}' is missing or not a string` };
+    if (v.includes(CLAIM_JOIN_SEP)) return { error: `claim field '${safe(name)}' contains the join separator — ambiguous preimage, cannot verify safely` };
     values.push(v);
   }
   return { hash: await sha256Hex(values.join(CLAIM_JOIN_SEP)) };
@@ -504,19 +462,24 @@ async function verifyHtmlEnvelope(raw: string): Promise<LensResult> {
   const json = extractHtmlPayloadJson(raw);
   if (json === null) return unreadable("KNOBE payload markers not found", 0);
 
-  let payload: Record<string, unknown>;
+  let parsed: PyValue;
   try {
-    const parsed = parseStrictJson(json);
-    if (!isObj(parsed)) return unreadable("KNOBE payload is not a JSON object", 1);
-    payload = parsed;
+    parsed = parseStrictJson(json);
   } catch {
     return unreadable("KNOBE payload could not be parsed", 1);
   }
+  if (!isDict(parsed)) return unreadable("KNOBE payload is not a JSON object", 1);
+  // UTF-8 encoding turns an unpaired surrogate into the bytes of U+FFFD, so two
+  // different claims would share one hash: reject, as the B64 path does.
+  if (hasLoneSurrogate(parsed)) {
+    return unreadable("KNOBE payload contains characters that cannot be UTF-8 encoded (e.g. an unpaired surrogate); rejected", 1);
+  }
+  const payload = toPlain(parsed) as Record<string, unknown>;
 
   const integ = isObj(payload.integrity) ? payload.integrity : null;
   const method = integ && isObj(integ.canonicalization) ? integ.canonicalization.method : undefined;
   if (method !== CLAIM_JOIN_METHOD) {
-    return unreadable(`unsupported KNOBE canonicalization '${typeof method === "string" ? method : "unknown"}'`, 1, payload);
+    return unreadable(`unsupported KNOBE canonicalization '${typeof method === "string" ? safe(method) : "unknown"}'`, 1, payload);
   }
 
   const stored = integ && typeof integ.sha256 === "string" ? integ.sha256 : null;
@@ -546,8 +509,7 @@ function tryDecodeBareBlock(raw: string): Record<string, unknown> | null {
   while ((m = re.exec(raw)) !== null) last = m[1];
   if (last === null) return null;
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(decodeBase64Strict(last));
-    const parsed = parseStrictJson(text);
+    const parsed = parsePlainJson(decodeUtf8(decodeBase64Strict(last)));
     return isObj(parsed) ? parsed : null;
   } catch {
     return null;
@@ -583,59 +545,73 @@ export async function verify(raw: string): Promise<LensResult> {
     }
     return unreadable("no payload block found", 0);
   }
+  const n = blocks.length;
 
-  let payload: Record<string, unknown>;
+  // --- decode + parse the last block, rejecting ambiguous/illegal JSON ---
+  let parsed: PyValue;
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(decodeBase64Strict(blocks[blocks.length - 1]));
-    const parsed = parseStrictJson(text);
-    if (!isObj(parsed)) return unreadable(`payload is not a JSON object`, blocks.length);
-    payload = parsed;
+    parsed = parseStrictJson(decodeUtf8(decodeBase64Strict(blocks[n - 1])));
   } catch (e) {
-    if (e instanceof DuplicateKeyError) return unreadable(`payload contains duplicate JSON key: ${e.message}`, blocks.length);
-    return unreadable("payload could not be decoded or parsed", blocks.length);
+    if (e instanceof DuplicateKeyError) return unreadable(`payload contains duplicate JSON key: ${safe(e.key)} (ambiguous; rejected)`, n);
+    if (e instanceof NonJSONConstantError) return unreadable("payload contains a non-JSON numeric constant (NaN/Infinity); rejected", n);
+    return unreadable("payload could not be decoded or parsed", n);
+  }
+  if (!isDict(parsed)) return unreadable(`payload is not a JSON object (got ${pyTypeName(parsed)})`, n);
+  const payload = parsed;
+
+  // Unpaired surrogates anywhere (payload_hash included) cannot be encoded for
+  // hashing or display: reject before either.
+  if (hasLoneSurrogate(payload)) {
+    return unreadable("payload contains characters that cannot be UTF-8 encoded (e.g. an unpaired surrogate); rejected", n);
+  }
+  const plain = toPlain(payload) as Record<string, unknown>;
+
+  const collisions = findNfcCollisions(payload);
+  if (collisions.length) {
+    return unreadable(`payload keys collide under NFC normalization: ${collisions.slice(0, 5).join("; ")}`, n, plain);
   }
 
-  if (findNfcCollisions(payload).length) return unreadable("payload keys collide under NFC normalization", blocks.length, payload);
-
-  const specVersion = payload.spec_version;
-  if (specVersion !== undefined && !SUPPORTED_SPEC_VERSIONS.has(specVersion)) {
-    return unreadable(`unsupported spec_version: ${String(specVersion)} (this verifier supports ['1.0'])`, blocks.length, payload);
+  // Unsupported spec_version (any non-null value other than the string "1.0").
+  const sv = payload.get("spec_version");
+  if (sv !== undefined && sv !== null && !(typeof sv === "string" && SUPPORTED_SPEC_VERSIONS.has(sv))) {
+    const shown = safe(pyStr(sv));
+    return unreadable(`unsupported spec_version: ${shown}`, n, plain,
+      [`unsupported spec_version: ${shown} (this verifier supports ${pyRepr([...SUPPORTED_SPEC_VERSIONS].sort())})`]);
   }
 
-  const stored = typeof payload.payload_hash === "string" ? payload.payload_hash : "";
-  const computed = await payloadHashOf(payload);
+  // --- canonical hash (spec §5) ---
+  const ph = payload.has("payload_hash") ? (payload.get("payload_hash") as PyValue) : "";
+  const stored = ph === null ? null : pyStr(ph);
+  const rest: PyDict = new Map([...payload].filter(([k]) => k !== "payload_hash"));
+  const computed = await sha256Hex(canonical(rest));
 
-  const missing = REQUIRED.filter((f) => !(f in payload));
-  const att = payload.attribution;
-  const sourcesTruthy = isObj(att)
-    ? (Array.isArray(att.sources) ? att.sources.length > 0 : !!att.sources)
-    : false;
-  if ("attribution" in payload && !(isObj(att) && sourcesTruthy)) missing.push("attribution.sources");
+  const missing = REQUIRED.filter((f) => !payload.has(f));
+  const att = payload.get("attribution");
+  if (payload.has("attribution") && !(isDict(att) && pyTruthy(att.get("sources")))) missing.push("attribution.sources");
 
-  let state: Status = computed === stored ? "verified" : "failed";
+  let state: Status = typeof ph === "string" && computed === ph ? "verified" : "failed";
   const fm = parseFrontmatter(raw);
 
   let body: "match" | "mismatch" | null = null;
   let bodyVerified: BodyVerified = "omitted";
-  if (state === "verified" && "body_hash" in payload && blocks.length === 1) {
+  if (state === "verified" && payload.has("body_hash") && n === 1) {
+    // A block at byte 0 has no marker line before it: no frontmatter, no body.
     const markerIdx = lastBodyMarkerStart(raw);
-    if (markerIdx >= 0) {
-      const pre = raw.slice(0, markerIdx);
-      const bodyStart = findBodyStart(pre);
-      if (bodyStart === null) {
-        return unreadable("body_hash present but YAML frontmatter delimiters not found", blocks.length, payload);
-      }
-      const computedBody = await bodyHashOf(pre.slice(bodyStart));
-      if (computedBody === payload.body_hash) { body = "match"; bodyVerified = "yes"; }
-      else { body = "mismatch"; bodyVerified = "modified"; state = "verified-body-modified"; }
+    const pre = markerIdx >= 0 ? raw.slice(0, markerIdx) : "";
+    const bodyStart = findBodyStart(pre);
+    if (bodyStart === null) {
+      return unreadable("body_hash present but YAML frontmatter delimiters not found", n, plain);
     }
+    const computedBody = await bodyHashOf(pre.slice(bodyStart));
+    if (computedBody === payload.get("body_hash")) { body = "match"; bodyVerified = "yes"; }
+    else { body = "mismatch"; bodyVerified = "modified"; state = "verified-body-modified"; }
   }
 
-  const conf = checkConformance(payload, missing, fm.ok, fm.reason, fm.spec, blocks.length);
+  const conf = checkConformance(payload, missing, fm.ok, fm.reason, fm.spec, n);
 
   return {
-    state, computed, stored, payload, missing, body, bodyVerified,
+    state, computed, stored, payload: plain, missing, body, bodyVerified,
     conformance: conf.level, conformanceIssues: conf.issues,
-    multipleBlocks: blocks.length > 1, blockCount: blocks.length, reason: null,
+    multipleBlocks: n > 1, blockCount: n, reason: null,
   };
 }

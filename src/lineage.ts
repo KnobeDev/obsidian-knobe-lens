@@ -6,6 +6,8 @@
  * placeholder nodes so the gap is visible rather than silently dropped.
  */
 
+import { safe } from "./lens-core";
+
 export interface LineageInput {
   hash: string | null;
   title: string;
@@ -60,7 +62,7 @@ export function buildLineage(items: LineageInput[]): LineageGraph {
       if (!nodes.has(parent)) {
         nodes.set(parent, {
           hash: parent,
-          title: `External source ${parent.slice(0, 8)}…`,
+          title: `External source ${safe(parent, 8)}`, // a parent hash is payload text
           state: "external",
           contentType: "—",
           present: false,

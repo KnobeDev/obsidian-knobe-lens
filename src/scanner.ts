@@ -1,6 +1,6 @@
 import { withinFolder } from "./verification-scope";
 import { App, TFile } from "obsidian";
-import { verify, LensResult, hasKnobeMarker } from "./lens-core";
+import { verify, LensResult, hasKnobeMarker, safe } from "./lens-core";
 
 export interface ScanRow {
   file: TFile;
@@ -109,9 +109,10 @@ export async function scanVault(app: App, folder = ""): Promise<ScanRow[]> {
         file,
         raw,
         result,
-        title: pickTitle(p, file.basename),
-        quarantine: typeof p.quarantine_status === "string" ? p.quarantine_status : "—",
-        contentType: typeof p.content_type === "string" ? p.content_type : "—",
+        // Display-only fields: escaped once here for every view that shows them.
+        title: safe(pickTitle(p, file.basename)),
+        quarantine: typeof p.quarantine_status === "string" ? safe(p.quarantine_status) : "—",
+        contentType: typeof p.content_type === "string" ? safe(p.content_type) : "—",
         payloadHash: result.computed,
         parents: parentHashes(result.payload),
       });

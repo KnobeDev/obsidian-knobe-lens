@@ -1,6 +1,6 @@
-# KNOBE Lens
+# KNOBE Lens (KnobeDev)
 
-An Obsidian plugin to **verify, inspect, and seal** [KNOBE Protocol v1](https://knobe.org) knowledge objects directly in your vault.
+An Obsidian plugin, maintained by KnobeDev, to **verify, inspect, and seal** [KNOBE Protocol v1](https://knobe.org) knowledge objects directly in your vault. It is separate from the browser Lens at [knobe.org/lens](https://knobe.org/lens).
 
 KNOBE keeps a document's interpretive context — attribution, transformations, fidelity limits, use conditions, and accessibility lineage — inside the file, in plain text, hash-sealed. This plugin is both halves of the toolchain:
 
@@ -25,7 +25,7 @@ A KNOBE is **any Markdown note carrying a seal block** (`-----BEGIN KNOBE B64---
 
 1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin.
 2. BRAT → **Add beta plugin** → `https://github.com/KnobeDev/obsidian-knobe-lens`.
-3. Enable **KNOBE Lens** under Settings → Community plugins.
+3. Enable **KNOBE Lens (KnobeDev)** under Settings → Community plugins.
 
 BRAT installs the latest GitHub release and keeps it updated.
 
@@ -47,7 +47,7 @@ cd obsidian-knobe-lens && npm install && npm run build
 
 | Area | What it does |
 |---|---|
-| Verify | Faithful port of the reference `lens.py`, gated against the 9 published conformance vectors. Reports `verified` / `verified-body-modified` / `failed` / `unreadable` and a conformance level. |
+| Verify | Faithful port of the reference `lens.py` (KnobeOne/knobe-protocol 6132595), gated against the 9 published conformance vectors and a 156-file hostile battery, reasons and issue text included. Reports `verified` / `verified-body-modified` / `failed` / `unreadable` and a conformance level. |
 | Seal | Appends a hash-sealed payload built from frontmatter + settings defaults. Idempotent, so "re-seal on save" never loops. |
 | Save with KNOBE | Ctrl/Cmd+S opens a prompt prefilled from your defaults (or the note's existing seal) — every field editable, including a plain-language **instruction set** for AI/readers — then seals it into the document. Skippable per save, or disable the prompt in Settings → Save behavior. |
 | Trust verdicts | Record a **local** trusted/rejected decision per object, keyed by payload hash. Risk-aware filing warns before trusting body-modified or failed objects. Never written to the file; auto-stale if the file changes. |
