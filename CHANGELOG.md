@@ -6,6 +6,13 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-11-10
+
+### Fixed
+
+- Show adaptation lineage as readable relationships with full note titles.
+  Select a title to open note details, or expand the diagram when you need it.
+
 ## [0.11.3] - 2026-11-10
 
 ### Fixed
