@@ -16,7 +16,7 @@ A KNOBE is **any Markdown note carrying a seal block** (`-----BEGIN KNOBE B64---
 
 ### Requirements
 
-- Obsidian 1.4.0 or newer with Community plugins enabled.
+- Obsidian 1.5.1 or newer with Community plugins enabled.
 - **No additional Obsidian plugins are required at runtime.**
 - SortableJS, which powers portfolio drag-and-drop, is bundled inside KNOBE Lens.
 - BRAT is optional: it is only a convenient way to install and update beta releases.
