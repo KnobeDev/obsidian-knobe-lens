@@ -1,4 +1,4 @@
-import { LineageGraph } from "./lineage";
+import type { LineageGraph } from "./lineage";
 import { safe } from "./lens-core";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -23,12 +23,15 @@ const STATE_LABEL: Record<string, string> = {
   external: "External",
 };
 
-/** Render an accessible layered lineage graph plus a text fallback list. */
+/** Show full relationships first, with the visual graph available on demand. */
 export function renderLineage(
   container: HTMLElement,
   graph: LineageGraph,
   onSelect: (hash: string, present: boolean) => void,
 ): void {
+  const graphWasOpen = container.querySelector<HTMLDetailsElement>(".knobe-lineage-graph")?.open ?? false;
+  const active = container.ownerDocument.activeElement;
+  const focusKey = active && container.contains(active) ? active.getAttribute("data-lineage-focus") : null;
   container.empty();
   if (graph.nodes.length === 0) {
     container.createEl("p", { cls: "knobe-lens-muted", text: "No objects to chart yet." });
@@ -41,6 +44,40 @@ export function renderLineage(
     });
     return;
   }
+
+  const nodes = new Map(graph.nodes.map((node) => [node.hash, node]));
+  const list = container.createEl("ul", {
+    cls: "knobe-lineage-relationships",
+    attr: { "aria-label": "Adaptation relationships" },
+  });
+  const appendNote = (row: HTMLLIElement, hash: string, key: string): void => {
+    const node = nodes.get(hash);
+    if (!node?.present) {
+      row.createSpan({ text: node?.title ?? safe(hash, 8) });
+      return;
+    }
+    const button = row.createEl("button", {
+      cls: "knobe-lineage-note",
+      text: node.title,
+      attr: { type: "button", "data-lineage-focus": key },
+    });
+    button.addEventListener("click", () => onSelect(hash, true));
+  };
+
+  for (const { from, to } of graph.edges) {
+    const row = list.createEl("li");
+    appendNote(row, to, JSON.stringify([from, to, "child"]));
+    row.appendText(" lists ");
+    appendNote(row, from, JSON.stringify([from, to, "parent"]));
+    row.appendText(" in its history.");
+  }
+
+  const details = container.createEl("details", { cls: "knobe-lineage-graph" });
+  details.open = graphWasOpen;
+  const summary = details.createEl("summary", {
+    text: "View lineage diagram",
+    attr: { "data-lineage-focus": "summary" },
+  });
 
   // depth = longest parent chain (0 = root), with a cycle guard
   const incoming = new Map<string, string[]>();
@@ -59,7 +96,7 @@ export function renderLineage(
     return false;
   };
   if (graph.nodes.some((n) => cyclic(n.hash))) {
-    container.createEl("p", { cls: "knobe-lens-muted", text: "Note: the lineage contains a cycle — layout is approximate." });
+    details.createEl("p", { cls: "knobe-lens-muted", text: "The lineage contains a cycle. The diagram layout is approximate." });
   }
 
   const memo = new Map<string, number>();
@@ -98,7 +135,7 @@ export function renderLineage(
     return e;
   };
 
-  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", role: "img", class: "knobe-lineage-svg" });
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img", class: "knobe-lineage-svg" });
   svg.setAttribute("aria-label", `Adaptation lineage: ${graph.nodes.length} objects, ${graph.edges.length} links`);
 
   const defs = svgEl("defs");
@@ -123,15 +160,7 @@ export function renderLineage(
     const p = pos.get(n.hash);
     if (!p) continue;
     const label = STATE_LABEL[n.state] ?? n.state;
-    const presence = n.present ? "present in vault" : "external, not in vault";
-    // Only present nodes are activatable — an inert role=button would mislead AT.
-    const g = svgEl(
-      "g",
-      n.present
-        ? { class: "knobe-lineage-node", tabindex: 0, role: "button" }
-        : { class: "knobe-lineage-node is-external", role: "img" },
-    );
-    g.setAttribute("aria-label", `${n.title}, ${label}, ${n.contentType}, ${presence}`);
+    const g = svgEl("g");
     g.appendChild(
       svgEl("rect", {
         x: p.x, y: p.y, width: NODE_W, height: NODE_H, rx: 6,
@@ -146,26 +175,21 @@ export function renderLineage(
     t2.textContent = `${n.contentType} · ${label}`;
     g.appendChild(t1);
     g.appendChild(t2);
-    if (n.present) {
-      let activating = false;
-      const activate = () => {
-        if (activating) return;
-        activating = true;
-        onSelect(n.hash, n.present);
-        container.win.setTimeout(() => { activating = false; }, 100);
-      };
-      g.addEventListener("click", activate);
-      g.addEventListener("keydown", (ev) => {
-        const k = ev.key;
-        if (k === "Enter" || k === " ") { ev.preventDefault(); activate(); }
-      });
-    }
     svg.appendChild(g);
   }
-  container.appendChild(svg);
-
-  const titleOf = (h: string) => graph.nodes.find((n) => n.hash === h)?.title ?? safe(h, 8);
-  const list = container.createEl("ul", { cls: "knobe-lineage-fallback" });
-  list.setAttr("aria-label", "Lineage relationships");
-  for (const e of graph.edges) list.createEl("li", { text: `${titleOf(e.to)} adapts ${titleOf(e.from)}` });
+  const diagram = details.createDiv({
+    cls: "knobe-lineage-diagram",
+    attr: {
+      tabindex: "0",
+      role: "region",
+      "aria-label": "Scrollable lineage diagram",
+      "data-lineage-focus": "diagram",
+    },
+  });
+  diagram.appendChild(svg);
+  if (focusKey !== null) {
+    const replacement = Array.from(container.querySelectorAll<HTMLElement>("[data-lineage-focus]"))
+      .find((control) => control.getAttribute("data-lineage-focus") === focusKey);
+    (replacement ?? summary).focus({ preventScroll: true });
+  }
 }

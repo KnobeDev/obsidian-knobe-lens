@@ -505,19 +505,50 @@ body button.knobe-lens-primary-action:not(.clickable-icon) {
   border-radius: 8px;
   padding: 10px;
   background: var(--background-secondary);
-  overflow-x: auto;
 }
-.knobe-lineage-node {
+
+.knobe-lineage-relationships {
+  margin: 0;
+  padding-inline-start: 1.5em;
+  color: var(--text-normal);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.knobe-lineage-relationships li + li {
+  margin-top: 0.5em;
+}
+
+.knobe-lineage-relationships button.knobe-lineage-note {
+  display: inline;
+  height: auto;
+  max-width: 100%;
+  padding: 0 0.25em;
+  font: inherit;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.knobe-lineage-graph {
+  margin-top: 0.75em;
+}
+
+.knobe-lineage-graph summary {
   cursor: pointer;
 }
-.knobe-lineage-node:focus-visible rect {
-  outline: 2px solid var(--interactive-accent);
+
+.knobe-lineage-diagram {
+  overflow: auto;
+  max-height: 24rem;
+  margin-top: 0.5em;
 }
-.knobe-lineage-fallback {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin: 10px 0 0;
-  padding-left: 18px;
+
+.knobe-lineage-note:focus-visible,
+.knobe-lineage-graph summary:focus-visible,
+.knobe-lineage-diagram:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
 }
 
 /* disk-reconcile notice (files Obsidian hasn't indexed) */
