@@ -23,12 +23,6 @@ const STATE_LABEL: Record<string, string> = {
   external: "External",
 };
 
-function svgEl(tag: string, attrs: Record<string, string | number> = {}): SVGElement {
-  const e = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-  return e;
-}
-
 /** Render an accessible layered lineage graph plus a text fallback list. */
 export function renderLineage(
   container: HTMLElement,
@@ -98,6 +92,12 @@ export function renderLineage(
   const width = PAD * 2 + (Math.max(...cols.keys()) + 1) * (NODE_W + COL_GAP) - COL_GAP;
   const height = PAD * 2 + maxRows * (NODE_H + ROW_GAP) - ROW_GAP;
 
+  const svgEl = (tag: string, attrs: Record<string, string | number> = {}): SVGElement => {
+    const e = container.ownerDocument.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+    return e;
+  };
+
   const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", role: "img", class: "knobe-lineage-svg" });
   svg.setAttribute("aria-label", `Adaptation lineage: ${graph.nodes.length} objects, ${graph.edges.length} links`);
 
@@ -152,11 +152,11 @@ export function renderLineage(
         if (activating) return;
         activating = true;
         onSelect(n.hash, n.present);
-        window.setTimeout(() => { activating = false; }, 100);
+        container.win.setTimeout(() => { activating = false; }, 100);
       };
       g.addEventListener("click", activate);
       g.addEventListener("keydown", (ev) => {
-        const k = (ev as KeyboardEvent).key;
+        const k = ev.key;
         if (k === "Enter" || k === " ") { ev.preventDefault(); activate(); }
       });
     }

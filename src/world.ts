@@ -99,7 +99,7 @@ export function layoutWorld(nodes: WorldNode[], R: number): Vec3[] {
     (a, b) => byCluster[b].length - byCluster[a].length || (a < b ? -1 : 1),
   );
   const centers = fibonacciSphere(keys.length);
-  const out: Vec3[] = new Array(nodes.length);
+  const out = new Array<Vec3>(nodes.length);
   keys.forEach((key, ci) => {
     const members = byCluster[key]
       .slice()

@@ -31,7 +31,7 @@ export function sanitizePortfolioName(name: string): string | null {
 /** Structural folder check — a TFolder has a `children` array, a TFile does not.
  *  Avoids an `instanceof TFolder` runtime import so this module stays pure. */
 export function isFolder(f: TAbstractFile | null | undefined): f is TFolder {
-  return !!f && Array.isArray((f as TFolder).children);
+  return !!f && "children" in f && Array.isArray(f.children);
 }
 
 /** Immediate subfolders of the resolved portfolio root, sorted by name.

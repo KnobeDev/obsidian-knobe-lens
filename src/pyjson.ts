@@ -126,7 +126,7 @@ export function toPlain(x: PyValue): unknown {
   if (typeof x === "bigint") return Number(x);
   if (Array.isArray(x)) return x.map(toPlain);
   if (isDict(x)) {
-    const out: Record<string, unknown> = Object.create(null);
+    const out = Object.create(null) as Record<string, unknown>;
     for (const [k, v] of x) out[k] = toPlain(v);
     return out;
   }

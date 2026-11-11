@@ -352,13 +352,13 @@ export class KnobeLensView extends ItemView {
     box.createEl("strong", {
       text: `${n}${found.capped ? "+" : ""} KNOBE file(s) on disk aren’t loaded by Obsidian yet.`,
     });
-    box.createEl("div", {
+    box.createDiv({
       cls: "knobe-lens-muted",
       text: "Likely added outside Obsidian. Open each once, or reopen the vault to load them, then Rescan.",
     });
     const ul = box.createEl("ul", { cls: "knobe-lens-notice-list" });
     for (const p of found.paths.slice(0, 10)) ul.createEl("li", { text: p });
-    if (n > 10) box.createEl("div", { cls: "knobe-lens-muted", text: `…and ${n - 10} more.` });
+    if (n > 10) box.createDiv({ cls: "knobe-lens-muted", text: `…and ${n - 10} more.` });
   }
 
   /** A file filed under the portfolio root — shown in the Portfolios section, not
@@ -527,7 +527,7 @@ export class KnobeLensView extends ItemView {
           "knobe-lens-action-button is-confirmed knobe-lens-card-action");
         btn.setAttr("aria-label", `"${row.title}" is confirmed — saved and verified. Open it to review or add to its history.`);
         btn.onclick = () => void this.select(row);
-        td.createEl("div", {
+        td.createDiv({
           cls: "knobe-lens-move-help",
           text: "Saved and verified. Open it to review or add another comment.",
           attr: { id: helpId },
@@ -538,7 +538,7 @@ export class KnobeLensView extends ItemView {
           "knobe-lens-action-button is-trust knobe-lens-card-action");
         btn.setAttr("aria-label", `${label} "${row.title}" — record your thoughts and seal them into its history`);
         btn.onclick = () => this.requestCommentReseal(row, trustToFilePolicy(state));
-        td.createEl("div", {
+        td.createDiv({
           cls: "knobe-lens-move-help",
           text: "Add your thoughts and seal them into this object's history.",
           attr: { id: helpId },
@@ -562,7 +562,7 @@ export class KnobeLensView extends ItemView {
           await this.select(row);
           await this.plugin.openWithEditedHighlights(row.file);
         };
-        td.createEl("div", {
+        td.createDiv({
           cls: "knobe-lens-move-help",
           text: "Changed since it was sealed — review the highlighted lines, then comment and reseal.",
           attr: { id: helpId },
@@ -574,7 +574,7 @@ export class KnobeLensView extends ItemView {
           : "Unreadable object — it cannot be sealed until it can be read.";
         btn.setAttr("aria-label", `Review "${row.title}" before verifying — ${why}`);
         btn.onclick = () => void this.select(row);
-        td.createEl("div", { cls: "knobe-lens-move-help", text: why, attr: { id: helpId } });
+        td.createDiv({ cls: "knobe-lens-move-help", text: why, attr: { id: helpId } });
       }
     }
 
@@ -883,7 +883,7 @@ export class KnobeLensView extends ItemView {
     for (const [path, trigger] of this.rowTriggers) {
       const isSel = path === this.selectedPath;
       trigger.setAttr("aria-pressed", String(isSel));
-      (trigger.closest(".knobe-lens-card") as HTMLElement | null)?.toggleClass("is-selected", isSel);
+      trigger.closest(".knobe-lens-card")?.toggleClass("is-selected", isSel);
     }
   }
 
@@ -941,7 +941,7 @@ export class KnobeLensView extends ItemView {
       if (!Object.prototype.hasOwnProperty.call(p, key)) continue;
       const tr = fieldTable.createEl("tr");
       tr.createEl("td", { text: key, cls: "knobe-lens-fname" });
-      tr.createEl("td", { text: renderValue((p as Record<string, unknown>)[key]) });
+      tr.createEl("td", { text: renderValue(p[key]) });
     }
 
     const det = d.createEl("details");
@@ -985,7 +985,7 @@ export class KnobeLensView extends ItemView {
 
     if (saved === "needs-reverify") {
       box.createEl("h5", { text: "Reverify", cls: "knobe-lens-section" });
-      box.createEl("div", {
+      box.createDiv({
         cls: "knobe-lens-muted",
         text: "This filed object was edited after it was sealed. Review the changes, add a note about what changed, and reseal to reverify it.",
       });
@@ -1004,7 +1004,7 @@ export class KnobeLensView extends ItemView {
    *  the meaning off colour/decoration alone (SC 1.4.1). */
   private renderSealChanges(parent: HTMLElement, row: ScanRow): void {
     const wrap = parent.createDiv({ cls: "knobe-lens-seal-changes" });
-    wrap.createEl("div", { cls: "knobe-lens-muted", text: "Changes since the last verified seal:" });
+    wrap.createDiv({ cls: "knobe-lens-muted", text: "Changes since the last verified seal:" });
     const snap = this.plugin.snapshotFor(row.file.path);
     if (!snap) {
       wrap.createSpan({ cls: "knobe-lens-muted", text: "No last-verified snapshot available — cannot show a diff." });
@@ -1119,7 +1119,7 @@ export class KnobeLensView extends ItemView {
       restore.onclick = async () => { await this.plugin.restoreSnapshot(row.file); await this.refresh(); };
     }
     const hasEmbedded = !!row.result.payload
-      && typeof (row.result.payload as Record<string, unknown>).ext_body_snapshot === "string";
+      && typeof row.result.payload.ext_body_snapshot === "string";
     if (hasEmbedded && row.result.state === "verified-body-modified") {
       const re = actions.createEl("button", { text: "Restore from embedded snapshot" });
       re.setAttr("aria-label", "Restore from embedded snapshot (self-contained, sealed inside this file)");
@@ -1134,13 +1134,13 @@ export class KnobeLensView extends ItemView {
     box.createEl("h5", { text: "Your review", cls: "knobe-lens-section" });
 
     const verdict = getVerdict(this.plugin.trust, row.payloadHash);
-    box.createEl("div", {
+    box.createDiv({
       cls: "knobe-lens-muted",
       text: `Declared: ${row.quarantine}. Your local verdict: ${verdict ? verdict.verdict : "unreviewed"}. (Local only — never written to the file.)`,
     });
 
     if (!row.payloadHash) {
-      box.createEl("div", { cls: "knobe-lens-muted", text: "Unreadable object — no verdict can be recorded." });
+      box.createDiv({ cls: "knobe-lens-muted", text: "Unreadable object — no verdict can be recorded." });
       return;
     }
     const hash = row.payloadHash;
