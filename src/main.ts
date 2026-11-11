@@ -83,6 +83,7 @@ interface PluginData {
 export default class KnobeLensPlugin extends Plugin {
   settings: KnobeLensSettings = DEFAULT_SETTINGS;
   trust: TrustLedger = {};
+  private pendingPersistence: Promise<void> = Promise.resolve();
   private snapshots: Record<string, Snapshot> = {};
   private portfolioColors: PortfolioColors = {};
   private resealTimers = new Map<string, number>();
@@ -669,14 +670,33 @@ export default class KnobeLensPlugin extends Plugin {
 
   /* ---- trust verdicts (never written to the file) ---- */
 
-  async setVerdict(hash: string, verdict: Verdict, note: string): Promise<void> {
-    this.trust = setVerdict(this.trust, hash, verdict, note, new Date().toISOString());
-    await this.persist();
+  setVerdict(hash: string, verdict: Verdict, note: string): Promise<void> {
+    return this.updateTrust((ledger) => setVerdict(ledger, hash, verdict, note, new Date().toISOString()));
   }
 
-  async clearVerdict(hash: string): Promise<void> {
-    this.trust = clearVerdict(this.trust, hash);
-    await this.persist();
+  setVerdicts(hashes: readonly string[], verdict: Verdict, note: string): Promise<void> {
+    return this.updateTrust((ledger) => {
+      const at = new Date().toISOString();
+      for (const hash of hashes) {
+        // The batch only authorizes new verdicts. Respect any decision that
+        // arrived after confirmation while another write was pending.
+        if (!getVerdict(ledger, hash)) ledger = setVerdict(ledger, hash, verdict, note, at);
+      }
+      return ledger;
+    });
+  }
+
+  clearVerdict(hash: string): Promise<void> {
+    return this.updateTrust((ledger) => clearVerdict(ledger, hash));
+  }
+
+  private updateTrust(update: (ledger: TrustLedger) => TrustLedger): Promise<void> {
+    return this.queuePersistence(async () => {
+      const next = update(this.trust);
+      if (next === this.trust) return;
+      await this.writePluginData(next);
+      this.trust = next;
+    });
   }
 
   /* ---- portfolios (real vault folders under a configurable root) ---- */
@@ -875,10 +895,21 @@ export default class KnobeLensPlugin extends Plugin {
       : {};
   }
 
-  async persist(): Promise<void> {
+  persist(): Promise<void> {
+    return this.queuePersistence(() => this.writePluginData(this.trust));
+  }
+
+  private queuePersistence(write: () => Promise<void>): Promise<void> {
+    const pending = this.pendingPersistence.then(write);
+    // Return the original rejection to its caller, and let subsequent writes run.
+    this.pendingPersistence = pending.catch(() => {});
+    return pending;
+  }
+
+  private async writePluginData(trust: TrustLedger): Promise<void> {
     const data: PluginData = {
-      settings: this.settings,
-      trust: this.trust,
+      settings: { ...this.settings },
+      trust,
       snapshots: this.snapshots,
       portfolioColors: this.portfolioColors,
     };

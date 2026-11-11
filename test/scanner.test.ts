@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { findUnindexedKnobeFiles, scanVault } from "../src/scanner";
+import { groupPortfolioRows, groupRecognitionRows } from "../src/board";
+import { isFiledUnder } from "../src/portfolio";
+import { withinFolder } from "../src/verification-scope";
 
 const SEAL = "-----BEGIN KNOBE B64-----\nZm9v\n-----END KNOBE B64-----\n";
 
@@ -87,6 +90,34 @@ describe("scanVault display fields", () => {
     expect(by("rlo.md").result.state).toBe("verified");
     expect(by("ctl.md").title).toBe("a\\x00b\\x1b[31mc\\x85d\\u2028e\\u2066f");
     expect(by("vocab.md").contentType).toBe("\\u202eevil\\x07");
+  });
+
+  it("shows batch-filed cards in an existing portfolio outside the Recognition scan folder", async () => {
+    const scope = "Inbox";
+    const root = "Portfolios";
+    const folder = { name: "Research", path: "Portfolios/Research" };
+    const sealed = readFileSync(join(process.cwd(), "test/vectors/minimal-valid.knobe.md"), "utf8");
+    const files = {
+      "Inbox/Third.md": sealed,
+      "Portfolios/Research/First.md": sealed,
+      "Portfolios/Research/Second.md": sealed,
+      "Portfolios/Research/Existing.md": sealed,
+      "Other/Unrelated.md": sealed,
+    };
+    const rows = await scanVault(appWith(files), scope, root);
+    const recognition = groupRecognitionRows(
+      rows.filter((row) => withinFolder(row.file.path, scope)),
+      (row) => isFiledUnder(row.file.path, root),
+    );
+    expect(recognition.flatMap((column) => column.rows.map((row) => row.file.path)))
+      .toEqual(["Inbox/Third.md"]);
+    const [lane] = groupPortfolioRows([folder], rows);
+    expect(lane.rows.map((row) => row.file.path)).toEqual([
+      "Portfolios/Research/First.md",
+      "Portfolios/Research/Second.md",
+      "Portfolios/Research/Existing.md",
+    ]);
+    expect(rows).toHaveLength(4);
   });
 
   it("lists an object whose spec_version is a JSON object instead of dropping it", async () => {

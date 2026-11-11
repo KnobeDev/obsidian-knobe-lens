@@ -6,6 +6,15 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-11-11
+
+### Added
+
+- Select multiple verified cards on the Recognition board and move them to a
+  portfolio in one operation. Confirm before recording any new local trust
+  verdicts. Notes that change during filing must be reviewed again. Filed cards
+  appear in the selected portfolio even when it is outside the scan folder.
+
 ## [0.11.4] - 2026-11-10
 
 ### Fixed
