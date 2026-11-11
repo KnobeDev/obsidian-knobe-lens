@@ -71,8 +71,8 @@ export function mergePayloadFields(
   const merged: Record<string, unknown> = { ...carried, ...overrides };
   const oldAttribution = record(carried.attribution);
   const newAttribution = record(overrides.attribution);
-  const oldSources = oldAttribution && Array.isArray(oldAttribution.sources) ? oldAttribution.sources : null;
-  const newSources = newAttribution && Array.isArray(newAttribution.sources) ? newAttribution.sources : null;
+  const oldSources: unknown[] | null = oldAttribution && Array.isArray(oldAttribution.sources) ? oldAttribution.sources : null;
+  const newSources: unknown[] | null = newAttribution && Array.isArray(newAttribution.sources) ? newAttribution.sources : null;
   if (oldAttribution && newAttribution && oldSources && newSources) {
     const sources = oldSources.slice();
     for (let i = 0; i < newSources.length; i++) {
@@ -111,7 +111,7 @@ export function descriptiveFrontmatter(
     if (k === "content_type" && !validContentTypes.includes(v)) continue;
     out[k] = v;
   }
-  return out as Partial<SealFields>;
+  return out;
 }
 
 /** Whether a self-contained body snapshot may be embedded, given the setting and
@@ -167,7 +167,7 @@ export async function carriedFields(raw: string): Promise<Partial<SealFields>> {
   if (!raw.includes(KNOBE_BEGIN_B64)) return {};
   const r = await verify(raw);
   if (r.state !== "verified" && r.state !== "verified-body-modified") return {};
-  return mergePayloadFields(r.payload ?? {}, {}) as Partial<SealFields>;
+  return mergePayloadFields(r.payload ?? {}, {});
 }
 
 /** Split a note into its YAML frontmatter and body, dropping any existing seal. */

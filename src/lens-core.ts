@@ -379,7 +379,7 @@ function unreadable(reason: string, blockCount: number, payload: Record<string, 
 
 /** Canonical payload hash (spec §5), computed over the payload minus payload_hash. */
 export async function payloadHashOf(payload: Record<string, unknown>): Promise<string> {
-  const obj: Record<string, unknown> = Object.create(null);
+  const obj = Object.create(null) as Record<string, unknown>;
   for (const k of Object.keys(payload)) if (k !== "payload_hash") obj[k] = payload[k];
   return sha256Hex(canonical(obj));
 }

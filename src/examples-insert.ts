@@ -53,11 +53,11 @@ export class ExamplePickerModal extends Modal {
     for (const ex of KNOBE_EXAMPLES) {
       const li = list.createEl("li", { cls: "knobe-lens-example-item" });
       const info = li.createDiv({ cls: "knobe-lens-example-info" });
-      info.createEl("div", { cls: "knobe-lens-example-title", text: ex.title });
+      info.createDiv({ cls: "knobe-lens-example-title", text: ex.title });
       const badges = info.createDiv({ cls: "knobe-lens-example-badges" });
       badges.createSpan({ cls: "knobe-lens-example-badge", text: ex.kind });
       badges.createSpan({ cls: "knobe-lens-example-badge is-muted", text: ex.quarantine });
-      info.createEl("div", { cls: "knobe-lens-example-desc", text: ex.description });
+      info.createDiv({ cls: "knobe-lens-example-desc", text: ex.description });
 
       const insert = li.createEl("button", { cls: "knobe-lens-action-button is-trust knobe-lens-icon-button" });
       setIcon(insert.createSpan({ cls: "knobe-lens-btn-icon" }), "file-plus");

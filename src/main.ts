@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, TFolder, WorkspaceLeaf, requireApiVersion } from "obsidian";
 import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 import { changedLineNumbers } from "./diff";
@@ -110,7 +110,7 @@ export default class KnobeLensPlugin extends Plugin {
     this.addSettingTab(new KnobeLensSettingTab(this.app, this));
 
     this.addCommand({
-      id: "open-knobe-lens",
+      id: "open-dashboard",
       name: "Open KNOBE Lens dashboard",
       callback: () => void this.activateView(),
     });
@@ -370,10 +370,10 @@ export default class KnobeLensPlugin extends Plugin {
         return;
       }
       const oldHash = current.computed;
-      const existing = Array.isArray(current.payload?.parents) ? current.payload.parents : [];
+      const existing: unknown[] = Array.isArray(current.payload?.parents) ? current.payload.parents : [];
       const parentTitle = typeof current.payload?.title === "string" ? current.payload.title : undefined;
       const parents = oldHash ? [...existing, parentReceipt(oldHash, "supersedes", parentTitle)] : existing;
-      const sealed = await this.buildSealed(file, raw, { quarantine_status: "trusted", parents } as Partial<SealFields>);
+      const sealed = await this.buildSealed(file, raw, { quarantine_status: "trusted", parents });
       if (sealed !== raw) await this.app.vault.modify(file, sealed);
       new Notice("Promoted to trusted — re-sealed; previous object recorded as parent.");
     } catch (e) {
@@ -407,7 +407,7 @@ export default class KnobeLensPlugin extends Plugin {
 
       // Append to the existing reseal_log (append-only history), only when the
       // author actually left a comment — an empty reseal must stay byte-stable.
-      const prevLog = Array.isArray(p.reseal_log) ? p.reseal_log : [];
+      const prevLog: unknown[] = Array.isArray(p.reseal_log) ? p.reseal_log : [];
       let reseal_log = prevLog;
       if (note) {
         const entry: ResealComment = { at: new Date().toISOString(), comment: note };
@@ -417,11 +417,11 @@ export default class KnobeLensPlugin extends Plugin {
       }
 
       // Preserve existing lineage parents and add a reverified-from edge (mirrors promote()).
-      const existing = Array.isArray(p.parents) ? p.parents : [];
+      const existing: unknown[] = Array.isArray(p.parents) ? p.parents : [];
       const parentTitle = typeof p.title === "string" ? p.title : undefined;
       const parents = oldHash ? [...existing, parentReceipt(oldHash, "supersedes", parentTitle)] : existing;
 
-      const sealed = await this.buildSealed(file, raw, { reseal_log, parents } as Partial<SealFields>);
+      const sealed = await this.buildSealed(file, raw, { reseal_log, parents });
       if (sealed === raw) {
         new Notice("Nothing to reverify — content and seal are already current.");
         return;
@@ -749,7 +749,11 @@ export default class KnobeLensPlugin extends Plugin {
       leaf = workspace.getLeaf("tab");
       await leaf.setViewState({ type: KNOBE_LENS_VIEW, active: true });
     }
-    void workspace.revealLeaf(leaf);
+    if (requireApiVersion("1.7.2")) {
+      await workspace.revealLeaf(leaf);
+    } else {
+      workspace.setActiveLeaf(leaf, { focus: true });
+    }
   }
 
   /* ---- status bar + verify command ---- */

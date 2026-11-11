@@ -17,7 +17,6 @@
  *   - prefers-reduced-motion => a static globe, no idle spin.
  */
 
-import { setIcon } from "obsidian";
 import {
   Vec3,
   WorldNode,
@@ -137,9 +136,9 @@ export class WorldGlobe {
   private H = 0;
   private dpr = 1;
 
-  private readonly reduce =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  private hostWindow: Window;
+  private readonly reduce: boolean;
+  private readonly unwatchWindow: () => void;
 
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = () => this.resize();
@@ -149,9 +148,20 @@ export class WorldGlobe {
   private capturedPointer: number | null = null;
 
   constructor(private container: HTMLElement, private opts: WorldGlobeOptions) {
+    this.hostWindow = container.win;
+    this.reduce = typeof this.hostWindow.matchMedia === "function" &&
+      this.hostWindow.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.groupBy = opts.groupBy ?? "kind";
     this.spin = !this.reduce;
     this.build();
+    this.unwatchWindow = container.onWindowMigrated((win) => {
+      if (win === this.hostWindow) return;
+      this.stopWindowCallbacks();
+      this.hostWindow = win;
+      this.wireResize();
+      this.resize();
+      if (this.spin && !this.dragging && !this.reduce) this.startLoop();
+    });
   }
 
   /* ---- mount ---- */
@@ -297,12 +307,8 @@ export class WorldGlobe {
   }
 
   destroy(): void {
-    if (this.raf) cancelAnimationFrame(this.raf);
-    this.raf = 0;
-    if (this.resizeRaf) cancelAnimationFrame(this.resizeRaf);
-    this.resizeRaf = 0;
-    this.resizeObserver?.disconnect();
-    window.removeEventListener("resize", this.onWindowResize);
+    this.unwatchWindow();
+    this.stopWindowCallbacks();
     // Release any capture from a drag interrupted by the view closing, and drop
     // the canvas listeners symmetrically with the observers above.
     if (this.capturedPointer != null) {
@@ -355,7 +361,7 @@ export class WorldGlobe {
     this.setStatus(this.spin ? "Globe spinning." : "Globe paused.");
     if (this.spin) this.startLoop();
     else if (this.raf) {
-      cancelAnimationFrame(this.raf);
+      this.hostWindow.cancelAnimationFrame(this.raf);
       this.raf = 0;
     }
   }
@@ -382,6 +388,16 @@ export class WorldGlobe {
   private resizeScheduled = false;
   private resizeRaf = 0;
 
+  private stopWindowCallbacks(): void {
+    if (this.raf) this.hostWindow.cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    if (this.resizeRaf) this.hostWindow.cancelAnimationFrame(this.resizeRaf);
+    this.resizeRaf = 0;
+    this.resizeScheduled = false;
+    this.resizeObserver?.disconnect();
+    this.hostWindow.removeEventListener("resize", this.onWindowResize);
+  }
+
   private wireResize(): void {
     if (typeof ResizeObserver === "function") {
       // Coalesce observer callbacks to at most one resize per animation
@@ -392,7 +408,7 @@ export class WorldGlobe {
       this.resizeObserver = new ResizeObserver(() => {
         if (this.resizeScheduled) return;
         this.resizeScheduled = true;
-        this.resizeRaf = requestAnimationFrame(() => {
+        this.resizeRaf = this.hostWindow.requestAnimationFrame(() => {
           this.resizeRaf = 0;
           this.resizeScheduled = false;
           this.resize();
@@ -400,14 +416,14 @@ export class WorldGlobe {
       });
       this.resizeObserver.observe(this.container);
     }
-    window.addEventListener("resize", this.onWindowResize);
+    this.hostWindow.addEventListener("resize", this.onWindowResize);
   }
 
   private resize(): void {
     const cssW = Math.max(0, this.canvas.clientWidth);
     const cssH = Math.max(0, this.canvas.clientHeight);
     if (cssW === 0 || cssH === 0) return; // not laid out yet
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const dpr = Math.max(1, this.hostWindow.devicePixelRatio || 1);
     // A no-op resize must return before touching the canvas: writing
     // canvas.width re-triggers the ResizeObserver, and without this guard
     // the observer and the canvas feed each other in a loop.
@@ -427,7 +443,7 @@ export class WorldGlobe {
   /* ---- theme-aware colors ---- */
 
   private cssVar(name: string, fallback: string): string {
-    const v = getComputedStyle(this.container).getPropertyValue(name).trim();
+    const v = this.hostWindow.getComputedStyle(this.container).getPropertyValue(name).trim();
     return v || fallback;
   }
 
@@ -444,7 +460,7 @@ export class WorldGlobe {
     muted: string;
     state: Record<string, string>;
   } {
-    const cs = getComputedStyle(this.container);
+    const cs = this.hostWindow.getComputedStyle(this.container);
     const v = (name: string, fb: string): string => cs.getPropertyValue(name).trim() || fb;
     const state: Record<string, string> = {};
     for (const [s, varName] of Object.entries(STATE_COLOR_VAR)) state[s] = v(varName, "#888");
@@ -475,9 +491,9 @@ export class WorldGlobe {
       this.raf = 0;
       if (this.spin && !this.dragging && !this.reduce) this.yaw += SPIN_PER_FRAME;
       this.draw();
-      if (this.spin && !this.dragging && !this.reduce) this.raf = requestAnimationFrame(step);
+      if (this.spin && !this.dragging && !this.reduce) this.raf = this.hostWindow.requestAnimationFrame(step);
     };
-    this.raf = requestAnimationFrame(step);
+    this.raf = this.hostWindow.requestAnimationFrame(step);
   }
 
   private strokePath3d(pts: Vec3[]): void {
@@ -572,7 +588,7 @@ export class WorldGlobe {
     // Canvas font must be concrete CSS — var() does not parse here.
     ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
     ctx.textAlign = "center";
-    this.screen = new Array(this.data.nodes.length).fill(null);
+    this.screen = new Array<ScreenPos | null>(this.data.nodes.length).fill(null);
     const order: number[] = [];
     for (let i = 0; i < this.data.nodes.length; i++) {
       const p = this.positions[i];
@@ -640,7 +656,7 @@ export class WorldGlobe {
     const a = facingAngles(this.positions[i]);
     this.spin = false; // don't rotate away from what the user just focused
     if (this.raf) {
-      cancelAnimationFrame(this.raf);
+      this.hostWindow.cancelAnimationFrame(this.raf);
       this.raf = 0;
     }
     this.yaw = a.yaw;
@@ -685,7 +701,7 @@ export class WorldGlobe {
       }
       this.spin = false; // the user takes the wheel
       if (this.raf) {
-        cancelAnimationFrame(this.raf);
+        this.hostWindow.cancelAnimationFrame(this.raf);
         this.raf = 0;
       }
       this.dragging = true;
@@ -754,7 +770,7 @@ export class WorldGlobe {
     // restore it to the same object afterward, so a background refresh never
     // drops a keyboard user to <body> (the structural signature already skips
     // no-op rebuilds; this covers grouping changes and real data changes).
-    const active = document.activeElement as HTMLElement | null;
+    const active = this.listEl.doc.activeElement;
     const refocusHash = active && this.listEl.contains(active) ? active.getAttr("data-hash") : null;
 
     this.listEl.empty();
@@ -804,7 +820,7 @@ export class WorldGlobe {
         } else {
           // A referenced-but-absent lineage parent: not activatable, so it's a
           // plain text row — present in reading order, never a dead focus stop.
-          this.nodeRow(li.createEl("div", { cls: "knobe-world-node-btn is-external" }), d);
+          this.nodeRow(li.createDiv({ cls: "knobe-world-node-btn is-external" }), d);
         }
       }
     });

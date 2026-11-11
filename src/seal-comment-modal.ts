@@ -36,7 +36,7 @@ export class SealCommentModal extends Modal {
         "aria-label": "Seal comment",
       },
     });
-    const error = contentEl.createEl("div", { cls: "knobe-lens-error", attr: { role: "alert" } });
+    const error = contentEl.createDiv({ cls: "knobe-lens-error", attr: { role: "alert" } });
 
     const actions = contentEl.createDiv({ cls: "knobe-lens-actions" });
     const seal = actions.createEl("button", {

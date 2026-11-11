@@ -75,7 +75,11 @@ export class SealDetailsModal extends Modal {
     let firstInput: HTMLElement | null = null;
 
     for (const spec of FIELDS) {
-      const row = form.createDiv({ cls: "knobe-lens-details-row" });
+      const row = form.createDiv({
+        cls: spec.kind === "textarea"
+          ? "knobe-lens-details-row knobe-lens-details-row-wide"
+          : "knobe-lens-details-row",
+      });
       const id = `kl-seal-${spec.key}`;
       row.createEl("label", { text: spec.label, cls: "knobe-lens-field-label", attr: { for: id } });
       // SC 1.3.1: the description must reach AT too, via aria-describedby below.
