@@ -6,6 +6,18 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-11-10
+
+### Fixed
+
+- Keep dashboard activation compatible with Obsidian 1.5.1 and use the globe's
+  owning window for animation and focus in pop-outs.
+- Add searchable settings on Obsidian 1.13 and later, while keeping the settings
+  tab available on earlier supported versions.
+- Resolve the Obsidian source and CSS lint findings without changing sealing
+  or verification behavior. Rebind any custom hotkey for **Open KNOBE Lens
+  dashboard**, whose command ID has changed.
+
 ## [0.11.2] - 2026-11-10
 
 ### Fixed
