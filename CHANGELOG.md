@@ -6,6 +6,26 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-11-10
+
+### Fixed
+
+- The manifest now asks for Obsidian 1.5.1 or newer instead of 1.4.0. Five dialogs
+  (new portfolio folder, insert an example, protocol reference, save with KNOBE, and
+  the trust check) set their title with `Modal.setTitle`, which Obsidian added in
+  1.5.1, so on 1.4.x and 1.5.0 they threw an error as they opened and came up without
+  their content. `versions.json` now says
+  1.5.1 for every release since 0.3.0, the first to use it, so Obsidian 1.4.x is
+  offered 0.2.0 instead of a release that breaks there.
+
+### Added
+
+- `test/manifest.test.ts` checks the manifest against Obsidian's manifest reference
+  (docs.obsidian.md/Reference/Manifest): the required fields and their types, the id
+  and name rules, x.y.z versions that `package.json` and `versions.json` agree with,
+  a `minAppVersion` no older than the newest Obsidian API the code calls, and
+  `isDesktopOnly: false` only while no source file loads a Node.js or Electron module.
+
 ## [0.11.1] - 2026-11-08
 
 ### Changed
