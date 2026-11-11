@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, TFile, TAbstractFile, Notice, debounce, setIco
 import Sortable from "sortablejs";
 import type KnobeLensPlugin from "./main";
 import { scanVault, ScanRow, findUnindexedKnobeFiles } from "./scanner";
-import { Status, extractBodyText, safe, safeLines } from "./lens-core";
+import { Status, extractBodyText, safe, safeLines, verify } from "./lens-core";
 import { savedState } from "./saved-state";
 import type { ResealComment } from "./seal";
 import { diagnoseBreak } from "./diagnose";
@@ -22,6 +22,10 @@ import {
 import { TrustConfirmModal } from "./trust-confirm-modal";
 import { SealCommentModal } from "./seal-comment-modal";
 
+import { BulkMoveConfirmModal } from "./bulk-move-confirm-modal";
+import { canTrustAndFileRow, pruneSelected, selectAllState, setAllSelected, toggleSelected } from "./selection";
+import { withinFolder } from "./verification-scope";
+
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
 const BODY_PREVIEW_LINES = 10;
 
@@ -38,10 +42,20 @@ const STATE_ICON: Record<Status, string> = {
   unreadable: "help-circle",
 };
 
+interface BulkTarget {
+  readonly file: TFile;
+  readonly path: string;
+  readonly hash: string;
+  readonly raw: string;
+  readonly title: string;
+  readonly needsTrust: boolean;
+}
+
 let controlIdSeq = 0;
 
 export class KnobeLensView extends ItemView {
   private rows: ScanRow[] = [];
+  private portfolioRows: ScanRow[] = [];
   private selectedPath: string | null = null;
   private rowTriggers = new Map<string, HTMLElement>();
   private recognitionEl!: HTMLElement;
@@ -62,6 +76,17 @@ export class KnobeLensView extends ItemView {
   // background rescan.
   private actionStatusEl!: HTMLElement;
   private portfolioSortables: Sortable[] = [];
+  private recognitionHeading!: HTMLElement;
+  private bulkToolbar!: HTMLElement;
+  private bulkAll!: HTMLInputElement;
+  private bulkDestination!: HTMLSelectElement;
+  private bulkMove!: HTMLButtonElement;
+  private bulkClear!: HTMLButtonElement;
+  private bulkCount!: HTMLElement;
+  private bulkSelection = new Set<string>();
+  private bulkCheckboxes = new Map<string, HTMLInputElement>();
+  private bulkPending = false;
+  private bulkMoving = false;
 
   // Re-entrancy guard: a scan triggered while one is running coalesces into a
   // single trailing rescan instead of interleaving two passes over the vault.
@@ -161,14 +186,15 @@ export class KnobeLensView extends ItemView {
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
     });
 
-    root.createEl("h4", { text: "Recognition" });
+    this.recognitionHeading = root.createEl("h4", { text: "Recognition", attr: { tabindex: "-1" } });
+    this.buildBulkToolbar(root, uid);
     this.recognitionEl = root.createDiv({
       cls: "knobe-lens-kanban-board",
       attr: {
         role: "group",
         // Recognition status is a derived cryptographic result, so these columns
         // are read-only; filing happens through each card's Move control.
-        "aria-label": "KNOBE objects grouped by recognition result. Read-only — use each card's Move to portfolio control to file it.",
+        "aria-label": "KNOBE objects grouped by recognition result",
       },
     });
 
@@ -251,7 +277,7 @@ export class KnobeLensView extends ItemView {
    */
   async refresh(announce = true, deep = false): Promise<void> {
     if (!this.mounted) return;
-    if (this.refreshing) {
+    if (this.refreshing || this.bulkMoving) {
       this.refreshQueued = true;
       if (deep) this.refreshQueuedDeep = true; // don't lose a Rescan behind a running scan
       return;
@@ -292,7 +318,10 @@ export class KnobeLensView extends ItemView {
     this.noticeEl.empty(); // clear any stale disk-reconcile notice; re-filled only on a deep scan
     if (announce) this.setSummary("Scanning vault…");
     try {
-      this.rows = await scanVault(this.app, this.plugin.settings.verificationFolder);
+      const { verificationFolder, portfolioRoot } = this.plugin.settings;
+      const rows = await scanVault(this.app, verificationFolder, portfolioRoot);
+      this.rows = rows.filter((row) => withinFolder(row.file.path, verificationFolder));
+      this.portfolioRows = rows.filter((row) => isFiledUnder(row.file.path, portfolioRoot));
     } catch (e) {
       console.error("[knobe-lens] scan failed:", e);
       this.setSummary("Scan failed — see the developer console.");
@@ -308,7 +337,13 @@ export class KnobeLensView extends ItemView {
         dirty = this.plugin.stageSnapshot(r.file.path, r.payloadHash, r.raw) || dirty;
       }
     }
-    if (dirty) await this.plugin.persist();
+    if (dirty) {
+      try {
+        await this.plugin.persist();
+      } catch (error) {
+        console.error("[knobe-lens] Could not save verification snapshots:", error);
+      }
+    }
 
     this.renderSummary();
     this.renderOnboarding();
@@ -317,7 +352,8 @@ export class KnobeLensView extends ItemView {
     this.renderLineage();
     this.renderPortfolios();
 
-    const sel = this.rows.find((r) => r.file.path === this.selectedPath);
+    const sel = this.portfolioRows.find((row) => row.file.path === this.selectedPath)
+      ?? this.rows.find((row) => row.file.path === this.selectedPath);
     if (sel) await this.renderDetail(sel);
     else this.detailEl.empty();
   }
@@ -409,8 +445,11 @@ export class KnobeLensView extends ItemView {
   }
 
   private renderRecognitionBoard(): void {
+    const active = this.recognitionEl.ownerDocument.activeElement;
+    const focusedPath = [...this.bulkCheckboxes].find(([, input]) => input === active)?.[0];
     this.recognitionEl.empty();
     this.rowTriggers.clear();
+    this.bulkCheckboxes.clear();
     const columns = groupRecognitionRows(this.rows, (row) => this.isFiled(row));
     columns.forEach((column) => {
       const headingId = `knobe-recognition-${column.state}`;
@@ -432,16 +471,33 @@ export class KnobeLensView extends ItemView {
         return;
       }
       const list = section.createEl("ul", { cls: "knobe-lens-card-list" });
-      column.rows.forEach((row, index) => this.renderCard(list, row, `r-${column.state}-${index}`, false));
+      column.rows.forEach((row, index) => this.renderCard(list, row, `r-${column.state}-${index}`, false, true));
     });
+    this.renderBulkToolbar();
+    if (focusedPath) (this.bulkCheckboxes.get(focusedPath) ?? this.recognitionHeading).focus();
   }
 
   /** Render one kanban card. The final row always contains the folder control,
    * providing a keyboard/voice alternative to drag-and-drop folder movement. */
-  private renderCard(list: HTMLElement, row: ScanRow, idSuffix: string, showState: boolean): void {
+  private renderCard(list: HTMLElement, row: ScanRow, idSuffix: string, showState: boolean, selectable = false): void {
     const card = list.createEl("li", { cls: "knobe-lens-card" });
     card.dataset.path = row.file.path;
     card.toggleClass("is-selected", row.file.path === this.selectedPath);
+
+    if (selectable && canTrustAndFileRow(row, this.plugin.trust)) {
+      const path = row.file.path;
+      const label = card.createEl("label", { cls: "knobe-lens-card-select" });
+      const checkbox = label.createEl("input", {
+        attr: { type: "checkbox", "aria-label": `Select ${row.title}` },
+      });
+      checkbox.onchange = () => {
+        if (!this.bulkPending && !this.bulkMoving) {
+          this.bulkSelection = toggleSelected(this.bulkSelection, path);
+        }
+        this.syncBulkToolbar();
+      };
+      this.bulkCheckboxes.set(path, checkbox);
+    }
 
     if (showState) {
       const status = card.createDiv({ cls: "knobe-lens-card-status" });
@@ -686,11 +742,276 @@ export class KnobeLensView extends ItemView {
     this.scheduleRefresh.cancel();
     await this.refresh(false);
     if (!this.mounted) return;
-    const moved = this.rows.find((r) => r.file.path === row.file.path);
+    const moved = this.portfolioRows.find((candidate) => candidate.file.path === row.file.path);
     if (moved) { await this.select(moved); return; }
-    // The moved object left the scan scope — keep focus in the view, not on <body>.
+    // Keep focus in the view if the moved object could not be indexed.
     this.detailEl.setAttr("aria-label", `Moved "${row.title}" to "${folderName}".`);
     this.detailEl.focus();
+  }
+
+  private buildBulkToolbar(root: HTMLElement, uid: number): void {
+    const toolbar = root.createDiv({
+      cls: "knobe-lens-select-toolbar",
+      attr: { role: "group", "aria-label": "File selected objects", hidden: "" },
+    });
+    this.bulkToolbar = toolbar;
+    const countId = `kl-bulk-count-${uid}`;
+    const destinationId = `kl-bulk-destination-${uid}`;
+
+    const selectAll = toolbar.createEl("label", { cls: "knobe-lens-select-all" });
+    this.bulkAll = selectAll.createEl("input", {
+      attr: { type: "checkbox", "aria-describedby": countId },
+    });
+    selectAll.createSpan({ text: "Select all" });
+    this.bulkAll.onchange = () => {
+      if (!this.bulkPending && !this.bulkMoving) {
+        this.bulkSelection = setAllSelected(this.bulkSelection, [...this.bulkCheckboxes.keys()], this.bulkAll.checked);
+      }
+      this.syncBulkToolbar();
+    };
+
+    this.bulkCount = toolbar.createSpan({ text: "0 selected", attr: { id: countId } });
+    const destination = toolbar.createEl("label", { cls: "knobe-lens-select-destination" });
+    destination.createSpan({ text: "Destination portfolio" });
+    this.bulkDestination = destination.createEl("select", {
+      cls: "knobe-lens-move",
+      attr: { id: destinationId },
+    });
+    this.bulkDestination.onchange = () => this.syncBulkToolbar();
+    this.bulkMove = toolbar.createEl("button", {
+      text: "Move selected",
+      attr: { type: "button", "aria-describedby": countId },
+    });
+    this.bulkMove.onclick = () => this.beginBulkMove();
+    this.bulkClear = toolbar.createEl("button", { text: "Clear selection", attr: { type: "button" } });
+    this.bulkClear.onclick = () => {
+      if (this.bulkPending || this.bulkMoving) return;
+      this.bulkSelection.clear();
+      this.syncBulkToolbar();
+    };
+    toolbar.createEl("p", {
+      cls: "knobe-lens-select-hint",
+      text: "Select verified objects to file them together. Filing an unreviewed object requires confirmation of a reversible local trust verdict.",
+    });
+  }
+
+  private renderBulkToolbar(): void {
+    const selectable = [...this.bulkCheckboxes.keys()];
+    this.bulkSelection = pruneSelected(this.bulkSelection, selectable);
+    const folders = this.plugin.portfolioFolders();
+    const signature = JSON.stringify(folders.map(({ path, name }) => [path, name]));
+    const picker = this.bulkDestination;
+    if (picker.dataset.options !== signature) {
+      const previous = picker.value;
+      picker.empty();
+      picker.createEl("option", { text: "Choose a portfolio…", attr: { value: NO_FOLDER_VALUE } });
+      for (const folder of folders) {
+        picker.createEl("option", { text: safe(folder.name), attr: { value: folder.path } });
+      }
+      picker.createEl("option", { text: "New folder…", attr: { value: NEW_FOLDER_VALUE } });
+      picker.dataset.options = signature;
+      picker.value = folders.some(({ path }) => path === previous) || previous === NEW_FOLDER_VALUE
+        ? previous : NO_FOLDER_VALUE;
+    }
+    if (selectable.length === 0 && this.bulkToolbar.contains(this.bulkToolbar.ownerDocument.activeElement)) {
+      this.recognitionHeading.focus();
+    }
+    this.bulkToolbar.hidden = selectable.length === 0;
+    this.syncBulkToolbar();
+  }
+
+  private syncBulkToolbar(): void {
+    const paths = [...this.bulkCheckboxes.keys()];
+    const state = selectAllState(this.bulkSelection, paths);
+    for (const [path, checkbox] of this.bulkCheckboxes) checkbox.checked = this.bulkSelection.has(path);
+    this.bulkAll.checked = state === "all";
+    this.bulkAll.indeterminate = state === "partial";
+    const count = paths.filter((path) => this.bulkSelection.has(path)).length;
+    this.bulkCount.setText(`${count} of ${paths.length} selected`);
+    const noDestination = this.bulkDestination.value === NO_FOLDER_VALUE;
+    const active = this.bulkToolbar.ownerDocument.activeElement;
+    if ((active === this.bulkMove && (count === 0 || noDestination)) || (active === this.bulkClear && count === 0)) {
+      this.focusBulkControl(count > 0 ? this.bulkDestination : this.bulkAll);
+    }
+    this.bulkMove.disabled = count === 0 || noDestination;
+    this.bulkClear.disabled = count === 0;
+  }
+
+  private focusBulkControl(preferred: HTMLButtonElement | HTMLInputElement | HTMLSelectElement): void {
+    if (!this.mounted) return;
+    if (this.bulkToolbar.hidden) this.recognitionHeading.focus();
+    else (preferred.disabled ? this.bulkAll : preferred).focus();
+  }
+
+  private beginBulkMove(): void {
+    if (this.bulkMoving || this.bulkPending || this.bulkMove.disabled) return;
+    const root = this.plugin.settings.portfolioRoot;
+    const targets: BulkTarget[] = [];
+    for (const row of this.rows) {
+      const path = row.file.path;
+      const hash = row.payloadHash;
+      if (!hash || !this.bulkSelection.has(path) || !this.bulkCheckboxes.has(path)) continue;
+      if (row.result.state !== "verified" || !canTrustAndFileRow(row, this.plugin.trust)) continue;
+      targets.push({
+        file: row.file, path, hash, raw: row.raw, title: row.title,
+        needsTrust: !getVerdict(this.plugin.trust, hash),
+      });
+    }
+    if (targets.length === 0) {
+      this.reportBulkMove("No selected objects are still eligible.");
+      return;
+    }
+    const value = this.bulkDestination.value;
+    if (value !== NEW_FOLDER_VALUE) {
+      const folderName = this.bulkDestination.selectedOptions[0]?.text ?? safe(value);
+      this.confirmBulkMove(targets, value, folderName, root);
+      return;
+    }
+
+    this.bulkPending = true;
+    let created: { path: string; name: string } | undefined;
+    new NewFolderModal(this.app, {
+      onSubmit: async (name) => {
+        if (root !== this.plugin.settings.portfolioRoot) return "The portfolio root changed. Choose a destination again.";
+        try {
+          const path = await this.plugin.createPortfolioFolder(name);
+          created = { path, name: safe(path.split("/").pop() ?? name) };
+          return null;
+        } catch (error) {
+          return errorMessage(error);
+        }
+      },
+      onClose: () => {
+        this.bulkPending = false;
+        if (!this.mounted) return;
+        if (created) this.confirmBulkMove(targets, created.path, created.name, root);
+        else this.focusBulkControl(this.bulkMove);
+      },
+    }).open();
+  }
+
+  private confirmBulkMove(targets: readonly BulkTarget[], folderPath: string, folderName: string, root: string): void {
+    const trustCount = targets.filter(({ needsTrust }) => needsTrust).length;
+    const run = () => {
+      this.focusBulkControl(this.bulkMove);
+      void this.runBulkMove(targets, folderPath, folderName, root);
+    };
+    if (trustCount === 0) {
+      run();
+      return;
+    }
+    this.bulkPending = true;
+    new BulkMoveConfirmModal(this.app, {
+      trustCount,
+      readyCount: targets.length - trustCount,
+      folderName,
+      onConfirm: run,
+      onClosed: (confirmed) => {
+        this.bulkPending = false;
+        if (!confirmed) this.focusBulkControl(this.bulkMove);
+      },
+    }).open();
+  }
+
+  private assertBulkDestination(folderPath: string, root: string): void {
+    const currentRoot = this.plugin.portfolioRootFolder();
+    const folder = this.app.vault.getAbstractFileByPath(folderPath);
+    if (root !== this.plugin.settings.portfolioRoot || !currentRoot || !isFolder(folder)
+      || folder.parent?.path !== currentRoot.path || folder.path !== folderPath) {
+      throw new Error("The destination is no longer in the current portfolio root.");
+    }
+  }
+
+  private async verifyBulkTarget(target: BulkTarget, root: string): Promise<boolean> {
+    const isCurrent = () => target.file.path === target.path
+      && this.app.vault.getAbstractFileByPath(target.path) === target.file
+      && withinFolder(target.path, this.plugin.settings.verificationFolder)
+      && !isFiledUnder(target.path, root);
+    if (!isCurrent()) return false;
+    const raw = await this.app.vault.read(target.file);
+    if (raw !== target.raw) return false;
+    const result = await verify(raw);
+    return result.state === "verified" && result.computed === target.hash && isCurrent()
+      && await this.app.vault.read(target.file) === raw && isCurrent();
+  }
+
+  private async runBulkMove(
+    targets: readonly BulkTarget[], folderPath: string, folderName: string, root: string,
+  ): Promise<void> {
+    if (!this.mounted || this.bulkMoving) return;
+    this.bulkMoving = true;
+    this.bulkToolbar.setAttr("aria-busy", "true");
+    this.bulkMove.setAttr("aria-disabled", "true");
+    this.scheduleRefresh.cancel();
+    const failed = new Map<string, string>();
+    let moved = 0;
+    let skipped = 0;
+    let problem: string | undefined;
+    try {
+      this.assertBulkDestination(folderPath, root);
+      const eligible: BulkTarget[] = [];
+      const trustHashes = new Set<string>();
+      for (const target of targets) {
+        try {
+          const current = await this.verifyBulkTarget(target, root);
+          const verdict = getVerdict(this.plugin.trust, target.hash)?.verdict;
+          if (!current || verdict === "rejected" || (!verdict && !target.needsTrust)) {
+            skipped++;
+            continue;
+          }
+          eligible.push(target);
+          if (!verdict) trustHashes.add(target.hash);
+        } catch (error) {
+          failed.set(target.path, `${target.title}: ${errorMessage(error)}`);
+        }
+      }
+      this.assertBulkDestination(folderPath, root);
+      if (trustHashes.size > 0) {
+        await this.plugin.setVerdicts([...trustHashes], "trusted", `Bulk trust and file: ${folderName}`);
+      }
+      for (const target of eligible) {
+        try {
+          const current = await this.verifyBulkTarget(target, root);
+          this.assertBulkDestination(folderPath, root);
+          if (!current || getVerdict(this.plugin.trust, target.hash)?.verdict !== "trusted") {
+            skipped++;
+            continue;
+          }
+          await this.plugin.moveToPortfolio(target.file, folderPath);
+          moved++;
+        } catch (error) {
+          failed.set(target.path, `${target.title}: ${errorMessage(error)}`);
+        }
+      }
+      this.bulkSelection = new Set(failed.keys());
+    } catch (error) {
+      problem = errorMessage(error);
+    } finally {
+      this.bulkMoving = false;
+      this.bulkToolbar.removeAttribute("aria-busy");
+      this.bulkMove.removeAttribute("aria-disabled");
+      this.scheduleRefresh.cancel();
+    }
+
+    const result = problem
+      ? `Could not complete filing: ${problem}`
+      : `Moved ${moved} ${moved === 1 ? "object" : "objects"} to “${folderName}”.`
+        + (skipped ? ` Skipped ${skipped} that were no longer eligible.` : "")
+        + (failed.size ? ` Could not move ${failed.size}. ${[...failed.values()].join("; ")}.` : "");
+    this.reportBulkMove(result);
+    if (problem || failed.size) new Notice(result);
+    await this.refresh(false).catch((error: unknown) => {
+      console.error("[knobe-lens] Could not refresh after filing:", error);
+      new Notice("Could not refresh the dashboard after filing. Use Rescan to update the board.");
+    });
+  }
+
+  private reportBulkMove(result: string): void {
+    if (!this.mounted) return;
+    this.actionStatusEl.setText("");
+    this.actionStatusEl.win.requestAnimationFrame(() => {
+      if (this.mounted) this.setActionStatus(result);
+    });
   }
 
   private renderPortfolios(): void {
@@ -705,7 +1026,7 @@ export class KnobeLensView extends ItemView {
       });
       return;
     }
-    const lanes = groupPortfolioRows(folders, this.rows);
+    const lanes = groupPortfolioRows(folders, this.portfolioRows);
     lanes.forEach((lane, laneIndex) => {
       const details = c.createEl("details", { cls: "knobe-lens-portfolio-lane", attr: { open: "" } });
       const color = this.plugin.portfolioColor(lane.folder.path, laneIndex);
@@ -763,7 +1084,7 @@ export class KnobeLensView extends ItemView {
   private async finishPortfolioDrop(card: HTMLElement, destinationList: HTMLElement): Promise<void> {
     const path = card.dataset.path;
     const destination = destinationList.dataset.folderPath;
-    const row = path ? this.rows.find((candidate) => candidate.file.path === path) : undefined;
+    const row = this.portfolioRows.find((candidate) => candidate.file.path === path);
     if (!row || !destination) {
       this.renderPortfolios();
       return;

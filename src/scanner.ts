@@ -1,4 +1,5 @@
 import { withinFolder } from "./verification-scope";
+import { isFiledUnder } from "./portfolio";
 import { App, TFile } from "obsidian";
 import { verify, LensResult, hasKnobeMarker, safe } from "./lens-core";
 
@@ -95,11 +96,11 @@ export async function findUnindexedKnobeFiles(app: App): Promise<DiskReconcileRe
   return { paths, capped };
 }
 
-/** Scan every markdown file for a KNOBE payload block and verify it. */
-export async function scanVault(app: App, folder = ""): Promise<ScanRow[]> {
+/** Verify notes in the scan scope and, when provided, the visible portfolios. */
+export async function scanVault(app: App, folder = "", portfolioRoot = ""): Promise<ScanRow[]> {
   const rows: ScanRow[] = [];
   for (const file of app.vault.getMarkdownFiles()) {
-    if (!withinFolder(file.path, folder)) continue;
+    if (!withinFolder(file.path, folder) && !isFiledUnder(file.path, portfolioRoot)) continue;
     try {
       const raw = await app.vault.cachedRead(file);
       if (!hasKnobeMarker(raw)) continue;
