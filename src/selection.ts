@@ -18,6 +18,16 @@ export function canTrustAndFileRow(row: ScanRow, trust: TrustLedger): boolean {
     && getVerdict(trust, row.payloadHash)?.verdict !== "rejected";
 }
 
+/** The board's "Move to portfolio" control for one object. Filing it needs the
+ * same intact, verified seal as bulk filing plus the user's trusted verdict: a
+ * trusted verdict never excuses a broken seal or unreviewed edits. An object
+ * already in a portfolio may still move to another one, which recognizes
+ * nothing new. */
+export function canFileRow(row: ScanRow, trust: TrustLedger, filed: boolean): boolean {
+  if (filed) return true;
+  return canTrustAndFileRow(row, trust) && getVerdict(trust, row.payloadHash)?.verdict === "trusted";
+}
+
 /** Tri-state for the "Select all" checkbox: all / some / none of the selectable
  *  paths are selected. "partial" drives the checkbox's indeterminate state. */
 export type SelectAllState = "all" | "partial" | "none";

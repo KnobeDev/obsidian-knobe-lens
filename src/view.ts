@@ -10,20 +10,20 @@ import { lineDiff } from "./diff";
 import { buildLineage } from "./lineage";
 import { renderLineage } from "./lineage-render";
 import { WorldGlobe, WorldDatum, WorldEdge, WorldRenderData } from "./world-render";
-import { getVerdict } from "./trust";
+import { getVerdict, Verdict } from "./trust";
 import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder, isFolder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
 import { groupPortfolioRows, groupRecognitionRows } from "./board";
 import {
+  boardSummary,
   shouldMovePortfolioCard,
   trustToFilePolicy,
-  TrustToFilePolicy,
 } from "./board-interactions";
 import { TrustConfirmModal } from "./trust-confirm-modal";
 import { SealCommentModal } from "./seal-comment-modal";
 
 import { BulkMoveConfirmModal } from "./bulk-move-confirm-modal";
-import { canTrustAndFileRow, pruneSelected, selectAllState, setAllSelected, toggleSelected } from "./selection";
+import { canFileRow, canTrustAndFileRow, pruneSelected, selectAllState, setAllSelected, toggleSelected } from "./selection";
 import { withinFolder } from "./verification-scope";
 
 export const KNOBE_LENS_VIEW = "knobe-lens-view";
@@ -404,27 +404,11 @@ export class KnobeLensView extends ItemView {
   }
 
   private renderSummary(): void {
-    if (this.rows.length === 0) {
-      this.setSummary("No sealed KNOBE notes found in this vault yet.");
-      return;
-    }
-    const unfiled = this.rows.filter((r) => !this.isFiled(r));
-    const filed = this.rows.length - unfiled.length;
-    if (unfiled.length === 0) {
-      this.setSummary(`All ${this.rows.length} KNOBE${this.rows.length === 1 ? "" : "s"} filed in portfolios.`);
-      return;
-    }
-    const counts: Record<Status, number> = { verified: 0, "verified-body-modified": 0, failed: 0, unreadable: 0 };
-    let quarantined = 0;
-    for (const r of unfiled) {
-      counts[r.result.state]++;
-      if (r.quarantine === "quarantine") quarantined++;
-    }
-    this.setSummary(
-      `${counts.verified} verified · ${counts["verified-body-modified"]} body-modified · ` +
-        `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined` +
-        (filed ? ` · ${filed} filed` : ""),
-    );
+    this.setSummary(boardSummary(this.rows.map((r) => ({
+      state: r.result.state,
+      filed: this.isFiled(r),
+      quarantined: r.quarantine === "quarantine",
+    }))));
   }
 
   /** Empty-state onboarding: when the vault has no sealed objects yet, offer a
@@ -542,10 +526,12 @@ export class KnobeLensView extends ItemView {
 
   /**
    * Per-row "Move to portfolio" control. A native <select> (free keyboard/AT
-   * semantics, change = up-event for SC 2.5.2). Enabled only once the user has
-   * locally marked the object "trusted" — otherwise it is truly disabled beside
-   * a prominent Trust to file button. The select remains visible and becomes the
-   * keyboard/voice alternative to drag-and-drop after trust is recorded.
+   * semantics, change = up-event for SC 2.5.2). Enabled only for an object
+   * whose seal verifies and that the user has locally marked "trusted"
+   * (canFileRow), or one already in a portfolio — otherwise it is truly
+   * disabled beside the card's action button and its help text. The select
+   * remains visible and becomes the keyboard/voice alternative to
+   * drag-and-drop once filing is allowed.
    */
   private renderMoveControl(td: HTMLElement, row: ScanRow, idSuffix: string): void {
     const selId = `kl-move-${idSuffix}`;
@@ -567,9 +553,10 @@ export class KnobeLensView extends ItemView {
     const trusted = getVerdict(this.plugin.trust, row.payloadHash)?.verdict === "trusted";
     const filed = this.isFiled(row);
     const saved = savedState(filed, row.result.state, row.result.conformance);
-    // Filing is allowed once the user has confirmed the object (local trusted
-    // verdict) — and an already saved-and-verified object may always be refiled.
-    const canFile = trusted || saved === "saved-verified" || filed;
+    // Filing needs a verified seal and the user's trusted verdict (the same rule
+    // as bulk filing); a trusted verdict alone never files a failed or edited
+    // object. An object already in a portfolio may move to another one.
+    const canFile = canFileRow(row, this.plugin.trust, filed);
 
     /* ---- card action button: label + behavior by recognition state ---- */
     const state = row.result.state;
@@ -593,7 +580,7 @@ export class KnobeLensView extends ItemView {
         const btn = this.iconTextButton(td, ["message-square-plus"], label,
           "knobe-lens-action-button is-trust knobe-lens-card-action");
         btn.setAttr("aria-label", `${label} "${row.title}" — record your thoughts and seal them into its history`);
-        btn.onclick = () => this.requestCommentReseal(row, trustToFilePolicy(state));
+        btn.onclick = () => this.requestCommentReseal(row);
         td.createDiv({
           cls: "knobe-lens-move-help",
           text: "Add your thoughts and seal them into this object's history.",
@@ -612,8 +599,9 @@ export class KnobeLensView extends ItemView {
       if (state === "verified-body-modified" && row.payloadHash) {
         // Edited since sealing (e.g. by an AI tool): open the note with the
         // changed lines highlighted, then comment & reseal from the detail pane.
+        // The accessible name starts with the visible label (SC 2.5.3).
         btn.setAttr("aria-label",
-          `Review "${row.title}" — it changed since sealing; open it with the changes highlighted, then comment and reseal`);
+          `Review Before Verifying: "${row.title}" changed since sealing; open it with the changes highlighted, then comment and reseal`);
         btn.onclick = async () => {
           await this.select(row);
           await this.plugin.openWithEditedHighlights(row.file);
@@ -625,10 +613,13 @@ export class KnobeLensView extends ItemView {
         });
       } else {
         // Failed or unreadable: open the detail / break inspector to review.
-        const why = state === "failed"
-          ? "The seal is broken — inspect it before verifying."
-          : "Unreadable object — it cannot be sealed until it can be read.";
-        btn.setAttr("aria-label", `Review "${row.title}" before verifying — ${why}`);
+        // A trusted failed object still can't be filed (canFileRow), so say so.
+        const why = state !== "failed"
+          ? "Unreadable object — it cannot be sealed until it can be read."
+          : trusted
+            ? "Trusted locally, but the seal is broken — it can't be filed until its seal verifies."
+            : "The seal is broken — inspect it before verifying.";
+        btn.setAttr("aria-label", `Review Before Verifying: "${row.title}" — ${why}`);
         btn.onclick = () => void this.select(row);
         td.createDiv({ cls: "knobe-lens-move-help", text: why, attr: { id: helpId } });
       }
@@ -661,6 +652,7 @@ export class KnobeLensView extends ItemView {
           onSubmit: async (name) => {
             try {
               select.setAttr("disabled", "true");
+              await this.assertStillFileable(row); // before creating the folder
               const path = await this.plugin.createPortfolioFolder(name);
               await this.plugin.moveToPortfolio(row.file, path);
               await this.afterMove(row, path.split("/").pop() ?? name);
@@ -678,6 +670,8 @@ export class KnobeLensView extends ItemView {
       select.setAttr("disabled", "true");
       void (async () => {
         try {
+          this.assertBulkDestination(value, this.plugin.settings.portfolioRoot);
+          await this.assertStillFileable(row);
           await this.plugin.moveToPortfolio(row.file, value);
           prevValue = value;
           await this.afterMove(row, folderName);
@@ -685,9 +679,36 @@ export class KnobeLensView extends ItemView {
           new Notice(errorMessage(e));
           select.value = prevValue; // revert the UI; nothing moved
           select.removeAttribute("disabled");
+          // Focus left the select while it was disabled. Rebuild the board with
+          // the current state now (instead of the queued rescan), then put focus
+          // back on this object's card and say why nothing moved.
+          this.scheduleRefresh.cancel();
+          await this.refresh(false);
+          if (!this.mounted) return;
+          (this.rowTriggers.get(row.file.path) ?? select).focus();
+          this.announceAction(errorMessage(e));
         }
       })();
     });
+  }
+
+  /** Re-check an unfiled object just before filing it, as bulk filing does
+   *  (verifyBulkTarget). The board's state comes from the last scan, and an
+   *  edit on disk inside the refresh window can keep the payload hash, so the
+   *  trusted verdict would still match. Moving an object between portfolios
+   *  recognizes nothing new and is not re-checked. */
+  private async assertStillFileable(row: ScanRow): Promise<void> {
+    if (this.isFiled(row)) return;
+    const hash = row.payloadHash;
+    const ok = hash !== null
+      && getVerdict(this.plugin.trust, hash)?.verdict === "trusted"
+      && await this.verifyBulkTarget(
+        { file: row.file, path: row.file.path, hash, raw: row.raw, title: row.title, needsTrust: false },
+        this.plugin.settings.portfolioRoot,
+      );
+    if (ok) return;
+    this.scheduleRefresh();
+    throw new Error(`"${row.title}" changed since the board was last checked. Review it again before filing it.`);
   }
 
   /** A button with one or more Lucide icons before its label. */
@@ -698,38 +719,76 @@ export class KnobeLensView extends ItemView {
     return btn;
   }
 
-  /** "Make Comment and Reseal": collect the user's thoughts, then reseal (which
-   *  also records a local trusted verdict). Risky states warn first, exactly
-   *  like the old trust flow did. */
-  private requestCommentReseal(row: ScanRow, policy: TrustToFilePolicy): void {
-    const openModal = (): void => {
-      new SealCommentModal(this.app, {
-        title: row.title,
-        onSubmit: async (comment) => {
-          try {
-            await this.plugin.resealWithComment(row.file, comment);
-            this.setActionStatus(`Sealed "${row.title}". Choose a portfolio to file it.`);
-            this.scheduleRefresh.cancel();
-            await this.refresh(false);
-            this.rowTriggers.get(row.file.path)?.focus();
-            return null;
-          } catch (e) {
-            return errorMessage(e);
-          }
-        },
-      }).open();
-    };
+  /** "Make Comment & Verify / Reseal" on a verified card: collect the user's
+   *  thoughts, then reseal (which also records a local trusted verdict). Only
+   *  verified objects offer it; failed and edited ones go to "Review Before
+   *  Verifying", and trusting those from the detail pane warns first
+   *  (requestVerdict). */
+  private requestCommentReseal(row: ScanRow): void {
+    new SealCommentModal(this.app, {
+      title: row.title,
+      onSubmit: async (comment) => {
+        try {
+          await this.plugin.resealWithComment(row.file, comment);
+          this.setActionStatus(`Sealed "${row.title}". Choose a portfolio to file it.`);
+          this.scheduleRefresh.cancel();
+          await this.refresh(false);
+          this.rowTriggers.get(row.file.path)?.focus();
+          return null;
+        } catch (e) {
+          return errorMessage(e);
+        }
+      },
+    }).open();
+  }
 
-    if (!policy.warning) {
-      openModal();
+  /** The detail pane's Trust and Reject buttons. Trusting a failed or edited
+   *  object shows the "Check the payload before trusting" warning first; its
+   *  safe default ("Review payload") opens the decoded payload instead. A
+   *  verdict is local only: canFileRow still keeps a failed or edited object
+   *  out of portfolios. */
+  private requestVerdict(row: ScanRow, hash: string, verdict: Verdict, note: () => string): void {
+    const policy = verdict === "trusted" ? trustToFilePolicy(row.result.state) : null;
+    const message = verdict === "rejected"
+      ? `Rejected "${row.title}" locally.`
+      : policy?.warning
+        ? `Trusted "${row.title}" locally. It can't be filed in a portfolio until its seal verifies.`
+        : `Trusted "${row.title}".`;
+    const record = (): Promise<void> => this.changeVerdict(() => this.plugin.setVerdict(hash, verdict, note()), message);
+    if (!policy?.warning) {
+      record().catch(reportVerdictError);
       return;
     }
     new TrustConfirmModal(this.app, {
       message: policy.warning,
       tone: policy.tone === "reject" ? "reject" : "promote",
-      onReview: () => void this.select(row),
-      onConfirm: async () => openModal(),
+      onReview: () => this.revealDecodedPayload(),
+      onConfirm: record,
     }).open();
+  }
+
+  /** Record, change or clear a local verdict, then re-render. The detail
+   *  pane's buttons are rebuilt, so move focus into the pane first and then
+   *  announce, so the focus announcement can't cut the message off. */
+  private async changeVerdict(change: () => Promise<void>, message: string): Promise<void> {
+    await change();
+    await this.refresh(false);
+    window.setTimeout(() => {
+      if (!this.mounted) return;
+      this.detailEl.focus();
+      this.announceAction(message);
+    }, 0);
+  }
+
+  /** Open the detail pane's decoded payload and move focus to it. */
+  private revealDecodedPayload(): void {
+    const payload = this.detailEl.querySelector<HTMLDetailsElement>("details.knobe-lens-decoded-payload");
+    if (!payload) {
+      this.detailEl.focus();
+      return;
+    }
+    payload.open = true;
+    payload.querySelector<HTMLElement>("summary")?.focus();
   }
 
   /** After a successful move: announce, rescan, and restore focus to the moved
@@ -1007,10 +1066,16 @@ export class KnobeLensView extends ItemView {
   }
 
   private reportBulkMove(result: string): void {
+    this.announceAction(result);
+  }
+
+  /** Clear the status region, then set it on the next frame, so the message is
+   *  announced even when it repeats the last one. */
+  private announceAction(message: string): void {
     if (!this.mounted) return;
     this.actionStatusEl.setText("");
     this.actionStatusEl.win.requestAnimationFrame(() => {
-      if (this.mounted) this.setActionStatus(result);
+      if (this.mounted) this.setActionStatus(message);
     });
   }
 
@@ -1265,7 +1330,7 @@ export class KnobeLensView extends ItemView {
       tr.createEl("td", { text: renderValue(p[key]) });
     }
 
-    const det = d.createEl("details");
+    const det = d.createEl("details", { cls: "knobe-lens-decoded-payload" });
     det.createEl("summary", { text: "Decoded payload (JSON)" });
     det.createEl("pre", { cls: "knobe-lens-pre", text: safeLines(JSON.stringify(p, null, 2)) });
 
@@ -1476,18 +1541,21 @@ export class KnobeLensView extends ItemView {
       cls: "knobe-lens-action-button is-trust",
       text: "Trust",
     });
-    trustBtn.onclick = async () => { await this.plugin.setVerdict(hash, "trusted", noteInput.value); await this.refresh(); };
+    trustBtn.onclick = () => this.requestVerdict(row, hash, "trusted", () => noteInput.value);
     const rejectBtn = actions.createEl("button", {
       cls: "knobe-lens-action-button is-reject",
       text: "Reject",
     });
-    rejectBtn.onclick = async () => { await this.plugin.setVerdict(hash, "rejected", noteInput.value); await this.refresh(); };
+    rejectBtn.onclick = () => this.requestVerdict(row, hash, "rejected", () => noteInput.value);
     if (verdict) {
       const clearBtn = actions.createEl("button", {
         cls: "knobe-lens-action-button is-clear",
         text: "Clear verdict",
       });
-      clearBtn.onclick = async () => { await this.plugin.clearVerdict(hash); await this.refresh(); };
+      clearBtn.onclick = () => {
+        this.changeVerdict(() => this.plugin.clearVerdict(hash), `Cleared your verdict on "${row.title}".`)
+          .catch(reportVerdictError);
+      };
     }
 
     if (row.result.state === "verified" && row.quarantine !== "trusted") {
@@ -1514,6 +1582,13 @@ function short(h: string | null): string {
 }
 
 /** User-facing message from a thrown value (portfolio ops throw Error). */
+
+/** Report a verdict that could not be recorded (no dialog to show it in). */
+function reportVerdictError(error: unknown): void {
+  console.error("[knobe-lens] recording the verdict failed:", error);
+  new Notice("Could not record your verdict — see the developer console.");
+}
+
 function errorMessage(e: unknown): string {
   return e instanceof Error && e.message ? e.message : "Could not complete the move — see the developer console.";
 }
