@@ -96,6 +96,11 @@ describe("boardSummary", () => {
     );
   });
 
+  it("counts dismissed cards alongside filed objects with broken seals", () => {
+    expect(boardSummary([], 2)).toBe("2 hidden from Recognition.");
+    expect(boardSummary([entry("failed", true)], 1)).toContain("1 filed (1 failed) · 1 hidden");
+  });
+
   it("names broken filed objects when everything is filed", () => {
     expect(boardSummary([entry("verified", true), entry("failed", true)])).toBe("All 2 KNOBEs filed in portfolios (1 failed).");
     expect(boardSummary([entry("verified", true)])).toBe("All 1 KNOBE filed in portfolios.");

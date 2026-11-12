@@ -84,6 +84,8 @@ export class KnobeLensView extends ItemView {
   private bulkClear!: HTMLButtonElement;
   private bulkCount!: HTMLElement;
   private bulkSelection = new Set<string>();
+  private pendingDismissals = new Set<string>();
+  private dismissButtons = new Map<string, HTMLButtonElement>();
   private bulkCheckboxes = new Map<string, HTMLInputElement>();
   private bulkPending = false;
   private bulkMoving = false;
@@ -403,12 +405,18 @@ export class KnobeLensView extends ItemView {
     return isFiledUnder(row.file.path, this.plugin.settings.portfolioRoot);
   }
 
+  private isDismissed(row: ScanRow): boolean {
+    return row.result.state === "verified"
+      && this.plugin.isRecognitionDismissed(row.file.path, row.payloadHash);
+  }
+
   private renderSummary(): void {
-    this.setSummary(boardSummary(this.rows.map((r) => ({
-      state: r.result.state,
-      filed: this.isFiled(r),
-      quarantined: r.quarantine === "quarantine",
-    }))));
+    const entries = this.rows.flatMap((row) => {
+      const filed = this.isFiled(row);
+      if (!filed && this.isDismissed(row)) return [];
+      return [{ state: row.result.state, filed, quarantined: row.quarantine === "quarantine" }];
+    });
+    this.setSummary(boardSummary(entries, this.rows.length - entries.length));
   }
 
   /** Empty-state onboarding: when the vault has no sealed objects yet, offer a
@@ -431,10 +439,12 @@ export class KnobeLensView extends ItemView {
   private renderRecognitionBoard(): void {
     const active = this.recognitionEl.ownerDocument.activeElement;
     const focusedPath = [...this.bulkCheckboxes].find(([, input]) => input === active)?.[0];
+    const focusedDismissal = [...this.dismissButtons].find(([, button]) => button === active)?.[0];
     this.recognitionEl.empty();
+    this.dismissButtons.clear();
     this.rowTriggers.clear();
     this.bulkCheckboxes.clear();
-    const columns = groupRecognitionRows(this.rows, (row) => this.isFiled(row));
+    const columns = groupRecognitionRows(this.rows, (row) => this.isFiled(row) || this.isDismissed(row));
     columns.forEach((column) => {
       const headingId = `knobe-recognition-${column.state}`;
       const section = this.recognitionEl.createEl("section", {
@@ -459,6 +469,7 @@ export class KnobeLensView extends ItemView {
     });
     this.renderBulkToolbar();
     if (focusedPath) (this.bulkCheckboxes.get(focusedPath) ?? this.recognitionHeading).focus();
+    if (focusedDismissal) (this.dismissButtons.get(focusedDismissal) ?? this.recognitionHeading).focus();
   }
 
   /** Render one kanban card. The final row always contains the folder control,
@@ -517,6 +528,38 @@ export class KnobeLensView extends ItemView {
 
     const footer = card.createDiv({ cls: "knobe-lens-card-footer" });
     this.renderMoveControl(footer, row, idSuffix);
+    const path = row.file.path;
+    const hash = row.payloadHash;
+    if (selectable && hash && row.result.state === "verified") {
+      const remove = footer.createEl("button", {
+        text: "Remove from Recognition",
+        attr: { type: "button", "aria-label": `Remove from Recognition: ${row.title}` },
+      });
+      if (this.pendingDismissals.has(path)) remove.setAttr("aria-disabled", "true");
+      this.dismissButtons.set(path, remove);
+      remove.onclick = () => void this.dismissRecognitionCard(row, path, hash, remove);
+    }
+  }
+
+  private async dismissRecognitionCard(row: ScanRow, path: string, hash: string, button: HTMLButtonElement): Promise<void> {
+    if (this.bulkMoving || this.bulkPending || this.pendingDismissals.has(path)
+      || row.file.path !== path || this.isFiled(row)) return;
+    this.pendingDismissals.add(path);
+    button.setAttr("aria-disabled", "true");
+    try {
+      await this.plugin.dismissRecognition(path, hash);
+    } catch (error) {
+      this.dismissButtons.get(path)?.removeAttribute("aria-disabled");
+      new Notice(`Could not remove the card: ${errorMessage(error)}`);
+      return;
+    } finally {
+      this.pendingDismissals.delete(path);
+    }
+    if (!this.mounted) return;
+    this.bulkSelection.delete(path);
+    this.renderSummary();
+    this.renderRecognitionBoard();
+    this.reportBulkMove(`Removed “${row.title}” from Recognition. The note was kept.`);
   }
 
   private cardFact(parent: HTMLElement, label: string, value: string): void {
@@ -644,6 +687,10 @@ export class KnobeLensView extends ItemView {
 
     let prevValue = select.value;
     select.addEventListener("change", () => {
+      if (this.pendingDismissals.has(row.file.path)) {
+        select.value = prevValue;
+        return;
+      }
       const value = select.value;
       if (value === NO_FOLDER_VALUE) { prevValue = value; return; }
       if (value === NEW_FOLDER_VALUE) {
@@ -909,7 +956,8 @@ export class KnobeLensView extends ItemView {
     for (const row of this.rows) {
       const path = row.file.path;
       const hash = row.payloadHash;
-      if (!hash || !this.bulkSelection.has(path) || !this.bulkCheckboxes.has(path)) continue;
+      if (!hash || this.pendingDismissals.has(path) || !this.bulkSelection.has(path)
+        || !this.bulkCheckboxes.has(path)) continue;
       if (row.result.state !== "verified" || !canTrustAndFileRow(row, this.plugin.trust)) continue;
       targets.push({
         file: row.file, path, hash, raw: row.raw, title: row.title,
@@ -983,6 +1031,8 @@ export class KnobeLensView extends ItemView {
 
   private async verifyBulkTarget(target: BulkTarget, root: string): Promise<boolean> {
     const isCurrent = () => target.file.path === target.path
+      && !this.pendingDismissals.has(target.path)
+      && !this.plugin.isRecognitionDismissed(target.path, target.hash)
       && this.app.vault.getAbstractFileByPath(target.path) === target.file
       && withinFolder(target.path, this.plugin.settings.verificationFolder)
       && !isFiledUnder(target.path, root);
@@ -1050,6 +1100,22 @@ export class KnobeLensView extends ItemView {
       this.bulkToolbar.removeAttribute("aria-busy");
       this.bulkMove.removeAttribute("aria-disabled");
       this.scheduleRefresh.cancel();
+    }
+
+    if (this.mounted && moved > 0) {
+      try {
+        // Obsidian updates the existing TFiles on rename. Reuse their scanned
+        // rows so both boards reflect the move while the vault rescan runs.
+        const { verificationFolder, portfolioRoot } = this.plugin.settings;
+        const rows = new Map([...this.portfolioRows, ...this.rows].map((row) => [row.file.path, row]));
+        this.portfolioRows = [...rows.values()].filter((row) => isFiledUnder(row.file.path, portfolioRoot));
+        this.rows = this.rows.filter((row) => withinFolder(row.file.path, verificationFolder));
+        this.renderSummary();
+        this.renderRecognitionBoard();
+        this.renderPortfolios();
+      } catch (error) {
+        console.error("[knobe-lens] Could not redraw after filing:", error);
+      }
     }
 
     const result = problem

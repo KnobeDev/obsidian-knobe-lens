@@ -86,12 +86,14 @@ function brokenFiled(entries: readonly SummaryEntry[]): string {
 /** The board's summary line. State counts cover the unfiled objects on the
  * recognition board; filed objects with a broken seal are named after the
  * filed count, so filing a failed object never hides it. */
-export function boardSummary(entries: readonly SummaryEntry[]): string {
-  if (entries.length === 0) return "No sealed KNOBE notes found in this vault yet.";
+export function boardSummary(entries: readonly SummaryEntry[], hidden = 0): string {
+  if (entries.length === 0) {
+    return hidden ? `${hidden} hidden from Recognition.` : "No sealed KNOBE notes found in this vault yet.";
+  }
   const unfiled = entries.filter((e) => !e.filed);
   const filed = entries.length - unfiled.length;
   const broken = brokenFiled(entries);
-  if (unfiled.length === 0) {
+  if (unfiled.length === 0 && hidden === 0) {
     return `All ${entries.length} KNOBE${entries.length === 1 ? "" : "s"} filed in portfolios${broken ? ` (${broken})` : ""}.`;
   }
   const counts: Record<Status, number> = { verified: 0, "verified-body-modified": 0, failed: 0, unreadable: 0 };
@@ -103,6 +105,7 @@ export function boardSummary(entries: readonly SummaryEntry[]): string {
   return (
     `${counts.verified} verified · ${counts["verified-body-modified"]} body-modified · ` +
     `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined` +
-    (filed ? ` · ${filed} filed${broken ? ` (${broken})` : ""}` : "")
+    (filed ? ` · ${filed} filed${broken ? ` (${broken})` : ""}` : "") +
+    (hidden ? ` · ${hidden} hidden` : "")
   );
 }

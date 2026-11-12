@@ -8,6 +8,11 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [0.11.6] - 2026-11-11
 
+### Added
+
+- Use **Remove from Recognition** on a verified card to hide it from the board
+  while keeping the note at its current vault path.
+
 ### Security
 
 - A failed (tampered) or edited object can no longer be filed in a portfolio on
@@ -30,6 +35,8 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ### Fixed
 
+- Bulk filing clears moved cards from Recognition and updates the destination
+  portfolio before the vault rescan finishes. Failed moves stay selected.
 - The board summary no longer hides a filed object whose seal is broken: after
   the filed count it names them, for example "3 filed (1 failed)". It used to
   count only unfiled objects, so filing a failed object dropped it from

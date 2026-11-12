@@ -78,6 +78,7 @@ interface PluginData {
   trust: TrustLedger;
   snapshots: Record<string, Snapshot>;
   portfolioColors: PortfolioColors;
+  recognitionDismissals?: Record<string, string>;
 }
 
 export default class KnobeLensPlugin extends Plugin {
@@ -86,6 +87,7 @@ export default class KnobeLensPlugin extends Plugin {
   private pendingPersistence: Promise<void> = Promise.resolve();
   private snapshots: Record<string, Snapshot> = {};
   private portfolioColors: PortfolioColors = {};
+  private recognitionDismissals: Record<string, string> = {};
   private resealTimers = new Map<string, number>();
   private verificationTimers = new Map<string, number>();
   private unloaded = false;
@@ -699,6 +701,19 @@ export default class KnobeLensPlugin extends Plugin {
     });
   }
 
+  isRecognitionDismissed(path: string, hash: string | null): boolean {
+    return hash !== null && this.recognitionDismissals[path] === hash;
+  }
+
+  dismissRecognition(path: string, hash: string): Promise<void> {
+    return this.queuePersistence(async () => {
+      if (this.isRecognitionDismissed(path, hash)) return;
+      const next = { ...this.recognitionDismissals, [path]: hash };
+      await this.writePluginData(this.trust, next);
+      this.recognitionDismissals = next;
+    });
+  }
+
   /* ---- portfolios (real vault folders under a configurable root) ---- */
 
   /** The configured portfolio root folder, or null if it doesn't exist yet. */
@@ -888,6 +903,9 @@ export default class KnobeLensPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, migrated);
     this.trust = data.trust ?? {};
     this.snapshots = data.snapshots ?? {};
+    const dismissals = data.recognitionDismissals;
+    this.recognitionDismissals = dismissals && typeof dismissals === "object" && !Array.isArray(dismissals)
+      ? dismissals : {};
     this.portfolioColors = data.portfolioColors
       && typeof data.portfolioColors === "object"
       && !Array.isArray(data.portfolioColors)
@@ -906,12 +924,15 @@ export default class KnobeLensPlugin extends Plugin {
     return pending;
   }
 
-  private async writePluginData(trust: TrustLedger): Promise<void> {
+  private async writePluginData(
+    trust: TrustLedger, recognitionDismissals = this.recognitionDismissals,
+  ): Promise<void> {
     const data: PluginData = {
       settings: { ...this.settings },
       trust,
       snapshots: this.snapshots,
       portfolioColors: this.portfolioColors,
+      recognitionDismissals,
     };
     await this.saveData(data);
   }
