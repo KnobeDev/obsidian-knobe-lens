@@ -7,9 +7,12 @@ interface TrustConfirmModalOptions {
   onConfirm: () => Promise<void>;
 }
 
-/** Confirmation gate for trusting a modified or failed object. The safe
- * "Review payload" action receives initial focus; trust still requires a
- * separate pointer-up/keyboard activation. */
+let nextDialogId = 0;
+
+/** Confirmation gate for trusting a modified or failed object from the detail
+ * pane. The safe "Review payload" action receives initial focus; trust still
+ * requires a separate pointer-up/keyboard activation. Trusting records a local
+ * verdict only; it does not file the object (see canFileRow). */
 export class TrustConfirmModal extends Modal {
   constructor(app: App, private opts: TrustConfirmModalOptions) {
     super(app);
@@ -19,9 +22,20 @@ export class TrustConfirmModal extends Modal {
     const { contentEl } = this;
     this.setTitle("Check the payload before trusting");
 
+    // Name, role and description for the dialog, so the warning is read when
+    // focus lands on "Review payload". Obsidian's Modal sets none (SC 4.1.2).
+    const titleId = `kl-trust-confirm-${++nextDialogId}`;
+    const warningId = `${titleId}-warning`;
+    this.modalEl.setAttr("role", "dialog");
+    this.modalEl.setAttr("aria-modal", "true");
+    this.titleEl.id = titleId;
+    this.modalEl.setAttr("aria-labelledby", titleId);
+    this.modalEl.setAttr("aria-describedby", warningId);
+
     contentEl.createEl("p", {
       cls: "knobe-lens-trust-warning",
       text: this.opts.message,
+      attr: { id: warningId },
     });
 
     const actions = contentEl.createDiv({ cls: "knobe-lens-actions" });
@@ -36,7 +50,7 @@ export class TrustConfirmModal extends Modal {
 
     const confirm = actions.createEl("button", {
       cls: `knobe-lens-action-button is-${this.opts.tone}`,
-      text: "Trust to file",
+      text: "Trust anyway",
     });
     let busy = false;
     confirm.onclick = () => void (async () => {

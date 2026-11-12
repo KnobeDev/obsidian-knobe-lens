@@ -6,6 +6,51 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-11-11
+
+### Security
+
+- A failed (tampered) or edited object can no longer be filed in a portfolio on
+  a trusted verdict alone. Since 0.9.0, the detail pane's **Trust** button
+  recorded a verdict with no warning, and that verdict unlocked **Move to
+  portfolio** for any object, so a broken seal could be filed in two clicks.
+  Filing one object from the board now follows the same rule as bulk filing:
+  the seal must verify, and the user must have trusted it. An object already in
+  a portfolio can still move to another portfolio.
+- **Trust** on a failed or edited object shows the "Check the payload before
+  trusting" warning again. Its first button, **Review payload**, opens the
+  decoded payload instead of recording anything. Its confirm button now reads
+  **Trust anyway** and says that trusting records a local verdict only: the
+  object can't be filed until its seal verifies. Since 0.9.0 the warning had
+  been reachable only from verified objects, which never get one.
+- **Move to portfolio** re-checks the object just before filing it, as bulk
+  filing does. If the note changed on disk since the board was last checked,
+  even in a way that keeps its payload hash, it is not filed, and Lens asks you
+  to review it again.
+
+### Fixed
+
+- The board summary no longer hides a filed object whose seal is broken: after
+  the filed count it names them, for example "3 filed (1 failed)". It used to
+  count only unfiled objects, so filing a failed object dropped it from
+  "failed".
+- A failed object you have trusted now says on its card why it still can't be
+  filed: "Trusted locally, but the seal is broken — it can't be filed until its
+  seal verifies."
+
+### Accessibility
+
+- The trust warning is a named dialog (`role="dialog"`, `aria-modal`, labelled
+  by its title and described by the warning), so screen readers read the
+  warning when focus lands on **Review payload** (WCAG 2.1 SC 4.1.2).
+- **Trust**, **Reject** and **Clear verdict** in the detail pane keep focus in
+  the pane and announce the result, including when it repeats the previous
+  message. Reject and Clear verdict used to drop focus and say nothing.
+- When **Move to portfolio** refuses a move, the reason is announced as well as
+  shown in a notice, and focus returns to the object's card.
+- The accessible name of **Review Before Verifying** now starts with its
+  visible label, so voice control can activate it by what it says (SC 2.5.3).
+
 ## [0.11.5] - 2026-11-11
 
 ### Added
