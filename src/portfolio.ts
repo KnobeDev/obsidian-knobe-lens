@@ -58,7 +58,7 @@ export function currentPortfolioName(file: TFile, rootPath: string): string | nu
 
 /** Vault path for a new portfolio folder of the given (already-sanitised) name. */
 export function portfolioPath(rootPath: string, name: string): string {
-  return `${rootPath}/${name}`;
+  return rootPath === "/" ? name : `${rootPath}/${name}`;
 }
 
 /** Destination path for moving a file named `fileName` into `folderPath`. */
@@ -70,6 +70,8 @@ export function targetPathFor(folderPath: string, fileName: string): string {
  *  "filed". Filed objects move out of the main list into the Portfolios section. */
 export function isFiledUnder(filePath: string, rootPath: string): boolean {
   if (rootPath === "") return false;
+  // Obsidian uses vault-relative file paths for top-level portfolios.
+  if (rootPath === "/") return filePath.includes("/");
   const normalizedRoot = rootPath.endsWith("/") ? rootPath.slice(0, -1) : rootPath;
   return filePath.startsWith(`${normalizedRoot}/`);
 }
