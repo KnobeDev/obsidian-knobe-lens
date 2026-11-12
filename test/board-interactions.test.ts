@@ -4,7 +4,10 @@ import {
   portfolioColor,
   shouldMovePortfolioCard,
   trustToFilePolicy,
+  boardSummary,
+  type SummaryEntry,
 } from "../src/board-interactions";
+import type { Status } from "../src/lens-core";
 
 describe("portfolioColor", () => {
   it("assigns distinct default lane colors and cycles safely", () => {
@@ -63,5 +66,43 @@ describe("trustToFilePolicy", () => {
     expect(policy.tone).toBe("reject");
     expect(policy.warning).toContain("checked the payload");
     expect(policy.warning).toContain("verification failed");
+  });
+});
+
+describe("trustToFilePolicy says what trusting does not do", () => {
+  it("tells the user a trusted verdict will not file a failed or edited object", () => {
+    for (const state of ["failed", "verified-body-modified"] as const) {
+      expect(trustToFilePolicy(state).warning, state).toContain("can't be filed in a portfolio until its seal verifies");
+    }
+  });
+});
+
+describe("boardSummary", () => {
+  const entry = (state: Status, filed = false, quarantined = false): SummaryEntry => ({ state, filed, quarantined });
+
+  it("says when the vault has no sealed notes", () => {
+    expect(boardSummary([])).toBe("No sealed KNOBE notes found in this vault yet.");
+  });
+
+  it("counts unfiled objects by state, then the filed ones", () => {
+    expect(boardSummary([entry("verified"), entry("failed", false, true), entry("verified", true)])).toBe(
+      "1 verified · 0 body-modified · 1 failed · 0 unreadable · 1 quarantined · 1 filed",
+    );
+  });
+
+  it("keeps a filed object with a broken seal visible as failed or unreadable", () => {
+    expect(boardSummary([entry("verified"), entry("failed", true), entry("unreadable", true), entry("verified", true)])).toBe(
+      "1 verified · 0 body-modified · 0 failed · 0 unreadable · 0 quarantined · 3 filed (1 failed, 1 unreadable)",
+    );
+  });
+
+  it("counts dismissed cards alongside filed objects with broken seals", () => {
+    expect(boardSummary([], 2)).toBe("2 hidden from Recognition.");
+    expect(boardSummary([entry("failed", true)], 1)).toContain("1 filed (1 failed) · 1 hidden");
+  });
+
+  it("names broken filed objects when everything is filed", () => {
+    expect(boardSummary([entry("verified", true), entry("failed", true)])).toBe("All 2 KNOBEs filed in portfolios (1 failed).");
+    expect(boardSummary([entry("verified", true)])).toBe("All 1 KNOBE filed in portfolios.");
   });
 });

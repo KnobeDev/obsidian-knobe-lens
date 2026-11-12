@@ -3,6 +3,7 @@ import {
   selectAllState,
   toggleSelected, setAllSelected, pruneSelected,
   canTrustAndFileRow,
+  canFileRow,
 } from "../src/selection";
 import type { ScanRow } from "../src/scanner";
 import { setVerdict, TrustLedger } from "../src/trust";
@@ -104,5 +105,50 @@ describe("pruneSelected", () => {
   it("drops selected paths that are no longer selectable (after a refresh)", () => {
     const after = pruneSelected(new Set(["a", "gone", "b"]), ["a", "b", "c"]);
     expect([...after].sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("canFileRow (the board's Move to portfolio gate for one object)", () => {
+  const unfiled = false;
+  const filed = true;
+
+  it("files a verified object once the user has trusted it", () => {
+    expect(canFileRow(row("a.md"), trustedOn("a.md-hash"), unfiled)).toBe(true);
+  });
+
+  it("waits for the user's trusted verdict on a verified, unreviewed object", () => {
+    expect(canFileRow(row("a.md"), {}, unfiled)).toBe(false);
+  });
+
+  it("never files a failed object, even after the user trusts it", () => {
+    expect(canFileRow(row("t.md", "failed"), trustedOn("t.md-hash"), unfiled)).toBe(false);
+  });
+
+  it("never files an edited (body-modified) object on a trusted verdict alone", () => {
+    expect(canFileRow(row("e.md", "verified-body-modified"), trustedOn("e.md-hash"), unfiled)).toBe(false);
+  });
+
+  it("never files an unreadable object or one without a payload identity", () => {
+    expect(canFileRow(row("u.md", "unreadable", "invalid", null), {}, unfiled)).toBe(false);
+    expect(canFileRow(row("n.md", "verified", "valid", null), {}, unfiled)).toBe(false);
+  });
+
+  it("does not file a verified object the user rejected", () => {
+    expect(canFileRow(row("a.md"), rejectedOn("a.md-hash"), unfiled)).toBe(false);
+  });
+
+  it("agrees with bulk filing: nothing it files is outside canTrustAndFileRow", () => {
+    const states = ["verified", "verified-body-modified", "failed", "unreadable"] as const;
+    for (const state of states) {
+      const r = row("x.md", state);
+      for (const ledger of [{}, trustedOn("x.md-hash"), rejectedOn("x.md-hash")]) {
+        if (canFileRow(r, ledger, unfiled)) expect(canTrustAndFileRow(r, ledger), state).toBe(true);
+      }
+    }
+  });
+
+  it("still lets an object already in a portfolio move to another portfolio", () => {
+    expect(canFileRow(row("t.md", "failed"), {}, filed)).toBe(true);
+    expect(canFileRow(row("a.md"), {}, filed)).toBe(true);
   });
 });
