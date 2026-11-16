@@ -3,7 +3,7 @@
  * No Obsidian imports, so it is unit-testable in isolation.
  */
 
-import { LensResult, Status, safe } from "./lens-core";
+import { Conformance, LensResult, OtherFormatCheck, Status, safe } from "./lens-core";
 import { TrustEntry } from "./trust";
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -11,11 +11,24 @@ const STATUS_LABEL: Record<Status, string> = {
   "verified-body-modified": "Verified, body modified after sealing",
   failed: "Failed — seal does not match",
   unreadable: "Unreadable — no valid payload",
+  "not-v1": "Not a KNOBE v1 result",
+};
+
+const CONFORMANCE_LABEL: Record<Conformance, string> = {
+  valid: "valid",
+  warnings: "warnings",
+  invalid: "invalid",
+  "not-assessed": "not assessed (not a KNOBE v1 object)",
 };
 
 const HEX64 = /^[0-9a-f]{64}$/;
 // Longest conformance issue shown. Issues can quote payload keys of any length.
 const ISSUE_LIMIT = 1000;
+// Field names listed in a non-v1 report before the rest are counted.
+const MAX_REPORT_FIELDS = 50;
+
+const V1_FOOTER = "> **Integrity is not truth.** A verified seal proves the payload is byte-intact — not that the content is true, safe, or cleared. Inspect quarantined objects before trusting.";
+const OTHER_FORMAT_FOOTER = "> **Not a KNOBE v1 result.** This file's own hash covers only the fields it lists. A match says nothing about the rest of the file, or about whether the content is true, safe, or cleared.";
 
 /** Payload-derived text as inert Markdown on one line. safe() first: control
  *  characters, line breaks, bidi controls and unpaired surrogates become visible
@@ -57,6 +70,30 @@ function attributionLine(payload: Record<string, unknown> | null): string {
     .join("\n");
 }
 
+/** Status cell. A non-v1 file names its own format after the label. */
+function statusCell(r: LensResult): string {
+  const label = STATUS_LABEL[r.state] ?? r.state;
+  return r.otherFormat ? `${label} — ${safeMarkdown(r.otherFormat.format) ?? "other format"} file` : label;
+}
+
+/** Integrity section for a non-v1 file: its own hash check, labelled as such,
+ *  never as a payload_hash match. */
+function otherFormatIntegrity(r: LensResult, check: OtherFormatCheck): string {
+  const match = check.hashMatches === null ? "not checked"
+    : check.hashMatches ? "yes, for the listed fields only" : "no";
+  const shown = check.coveredFields.slice(0, MAX_REPORT_FIELDS).map((f) => safeMarkdown(f, 60) ?? "(blank)").join(", ");
+  const more = check.coveredFields.length - MAX_REPORT_FIELDS;
+  const fields = more > 0 ? `${shown}, and ${more} more` : shown;
+  return `_${safeMarkdown(check.format) ?? "Other format"} hash, not a KNOBE v1 check._ ${safeMarkdown(r.reason, ISSUE_LIMIT) ?? ""}
+
+| | |
+|---|---|
+| Stored \`integrity.sha256\` | ${hashCell(r.stored)} |
+| Computed over the listed fields | ${hashCell(r.computed)} |
+| Fields the file lists | ${fields || "—"} |
+| Match | ${match} |`;
+}
+
 export function buildReportMarkdown(args: {
   file: { basename: string; path: string };
   result: LensResult;
@@ -83,19 +120,19 @@ export function buildReportMarkdown(args: {
 | | |
 |---|---|
 | **Document** | ${safeMarkdown(file.path) ?? "—"} |
-| **Verified at** | ${safeMarkdown(generatedAt) ?? "—"} |
-| **Status** | ${STATUS_LABEL[r.state] ?? r.state} |
-| **Conformance** | ${r.conformance} |
+| **${r.otherFormat ? "Checked at" : "Verified at"}** | ${safeMarkdown(generatedAt) ?? "—"} |
+| **Status** | ${statusCell(r)} |
+| **Conformance** | ${CONFORMANCE_LABEL[r.conformance] ?? r.conformance} |
 | **Body** | ${r.bodyVerified ?? "—"} |
 | **Payload blocks** | ${r.blockCount}${r.multipleBlocks ? " (last block evaluated, per spec §3.3)" : ""} |
 
 ## Integrity
 
-| | |
+${r.otherFormat ? otherFormatIntegrity(r, r.otherFormat) : `| | |
 |---|---|
 | Stored \`payload_hash\` | ${hashCell(r.stored)} |
 | Computed \`payload_hash\` | ${hashCell(r.computed)} |
-| Match | ${match ? "✅ yes" : "❌ no"} |
+| Match | ${match ? "✅ yes" : "❌ no"} |`}
 
 ## Conformance issues
 
@@ -105,7 +142,7 @@ ${bullets(r.conformanceIssues)}
 
 ${bullets(r.missing)}
 
-## Declared metadata (from the sealed payload)
+## Declared metadata (from the ${r.otherFormat ? "file's payload" : "sealed payload"})
 
 | Field | Value |
 |---|---|
@@ -119,6 +156,6 @@ ${attributionLine(p)}
 ${verdict ? `**${verdict.verdict}**${verdict.note ? ` — ${safeMarkdown(verdict.note)}` : ""} _(recorded ${safeMarkdown(verdict.at)})_` : "_No local verdict recorded._"}
 
 ---
-> **Integrity is not truth.** A verified seal proves the payload is byte-intact — not that the content is true, safe, or cleared. Inspect quarantined objects before trusting. Report generated locally by KNOBE Lens (KnobeDev).
+${r.otherFormat ? OTHER_FORMAT_FOOTER : V1_FOOTER} Report generated locally by KNOBE Lens (KnobeDev).
 `;
 }

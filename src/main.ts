@@ -103,6 +103,7 @@ export default class KnobeLensPlugin extends Plugin {
     "verified-body-modified": "KNOBE: body modified",
     failed: "KNOBE: failed",
     unreadable: "KNOBE: unreadable",
+    "not-v1": "KNOBE: not a v1 result",
   };
 
   async onload(): Promise<void> {
@@ -811,7 +812,8 @@ export default class KnobeLensPlugin extends Plugin {
   async verifyCurrent(file: TFile): Promise<void> {
     try {
       const r = await verify(await this.app.vault.read(file));
-      new Notice(`KNOBE: ${r.state} · conformance ${r.conformance}`);
+      // A non-v1 file gets its own plain sentence, never a state · conformance pair.
+      new Notice(r.state === "not-v1" ? `KNOBE: ${r.reason ?? "not a KNOBE v1 result."}` : `KNOBE: ${r.state} · conformance ${r.conformance}`);
     } catch (e) {
       console.error("[knobe-lens] verify failed:", e);
       new Notice("Verify failed — see the developer console.");
@@ -825,7 +827,8 @@ export default class KnobeLensPlugin extends Plugin {
       try {
         const result = await verify(await this.app.vault.read(f));
         const generatedAt = new Date().toISOString();
-        const verdict = getVerdict(this.trust, result.computed);
+        // Trust verdicts are keyed by KNOBE v1 payload hashes only.
+        const verdict = result.state === "not-v1" ? null : getVerdict(this.trust, result.computed);
         const md = buildReportMarkdown({ file: f, result, verdict, generatedAt });
         const note = await writeReport(this.app, f, md, generatedAt);
         const leaf = this.app.workspace.getLeaf(true);

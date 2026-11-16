@@ -92,6 +92,7 @@ export const PROTOCOL_REFERENCE: RefSection[] = [
       { term: "Body modified", def: "The payload seal is intact, but the visible body changed since sealing — reverify before relying on it." },
       { term: "Failed", def: "The stored hash does not match the payload: the seal is broken or the payload was edited." },
       { term: "Unreadable", def: "No decodable KNOBE payload block was found in the note." },
+      { term: "Not KNOBE v1", def: "The note uses another KNOBE format, the KNOBE.AI 0.1 HTML envelope. Lens checks the hash that file declares and says whether it matches, but that is not a KNOBE v1 result: the hash covers only the fields the file chooses to list, and its scheme is not prefix-free. These notes are listed on their own, never in Recognition, portfolios, the knowledge world or lineage." },
     ],
   },
   {
@@ -100,6 +101,7 @@ export const PROTOCOL_REFERENCE: RefSection[] = [
       { term: "Valid", def: "Every required field is present and well-formed." },
       { term: "Warnings", def: "Verifies, but something is non-canonical (e.g. multiple payload blocks or an unnamespaced custom vocabulary value)." },
       { term: "Invalid", def: "A required field is missing or malformed." },
+      { term: "Not assessed", def: "The note is not KNOBE v1, so KNOBE v1 conformance does not apply to it." },
     ],
   },
   {

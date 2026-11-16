@@ -11,7 +11,8 @@ export type BreakKind =
   | "body-edited"
   | "payload-record-altered"
   | "payload-hash-malformed"
-  | "unreadable";
+  | "unreadable"
+  | "not-v1";
 
 export interface BreakDiagnosis {
   kind: BreakKind;
@@ -28,6 +29,9 @@ export async function diagnoseBreak(raw: string, result: LensResult): Promise<Br
 
     case "unreadable":
       return { kind: "unreadable", benign: false, detail: result.reason ?? "Payload could not be read." };
+
+    case "not-v1":
+      return { kind: "not-v1", benign: false, detail: result.reason ?? "Not a KNOBE v1 object." };
 
     case "verified-body-modified": {
       const body = extractBodyText(raw);

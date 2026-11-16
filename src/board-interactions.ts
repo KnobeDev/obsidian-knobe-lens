@@ -86,17 +86,23 @@ function brokenFiled(entries: readonly SummaryEntry[]): string {
 /** The board's summary line. State counts cover the unfiled objects on the
  * recognition board; filed objects with a broken seal are named after the
  * filed count, so filing a failed object never hides it. */
-export function boardSummary(entries: readonly SummaryEntry[], hidden = 0): string {
+export function boardSummary(all: readonly SummaryEntry[], hidden = 0): string {
+  // Files that are not KNOBE v1 are counted on their own, never as verified,
+  // filed, or broken KNOBE v1 objects.
+  const otherCount = all.filter((e) => e.state === "not-v1").length;
+  const entries = all.filter((e) => e.state !== "not-v1");
+  const other = otherCount ? ` · ${otherCount} not KNOBE v1` : "";
   if (entries.length === 0) {
-    return hidden ? `${hidden} hidden from Recognition.` : "No sealed KNOBE notes found in this vault yet.";
+    if (hidden) return `${hidden} hidden from Recognition${other}.`;
+    return otherCount ? `No KNOBE v1 notes found in this vault yet${other}.` : "No sealed KNOBE notes found in this vault yet.";
   }
   const unfiled = entries.filter((e) => !e.filed);
   const filed = entries.length - unfiled.length;
   const broken = brokenFiled(entries);
   if (unfiled.length === 0 && hidden === 0) {
-    return `All ${entries.length} KNOBE${entries.length === 1 ? "" : "s"} filed in portfolios${broken ? ` (${broken})` : ""}.`;
+    return `All ${entries.length} KNOBE${entries.length === 1 ? "" : "s"} filed in portfolios${broken ? ` (${broken})` : ""}${other}.`;
   }
-  const counts: Record<Status, number> = { verified: 0, "verified-body-modified": 0, failed: 0, unreadable: 0 };
+  const counts: Record<Status, number> = { verified: 0, "verified-body-modified": 0, failed: 0, unreadable: 0, "not-v1": 0 };
   let quarantined = 0;
   for (const e of unfiled) {
     counts[e.state]++;
@@ -106,6 +112,7 @@ export function boardSummary(entries: readonly SummaryEntry[], hidden = 0): stri
     `${counts.verified} verified · ${counts["verified-body-modified"]} body-modified · ` +
     `${counts.failed} failed · ${counts.unreadable} unreadable · ${quarantined} quarantined` +
     (filed ? ` · ${filed} filed${broken ? ` (${broken})` : ""}` : "") +
-    (hidden ? ` · ${hidden} hidden` : "")
+    (hidden ? ` · ${hidden} hidden` : "") +
+    other
   );
 }

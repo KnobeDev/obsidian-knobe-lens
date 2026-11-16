@@ -105,4 +105,15 @@ describe("boardSummary", () => {
     expect(boardSummary([entry("verified", true), entry("failed", true)])).toBe("All 2 KNOBEs filed in portfolios (1 failed).");
     expect(boardSummary([entry("verified", true)])).toBe("All 1 KNOBE filed in portfolios.");
   });
+
+  it("counts files that are not KNOBE v1 on their own, never as verified or filed", () => {
+    expect(boardSummary([entry("verified"), entry("not-v1"), entry("not-v1", true)])).toBe(
+      "1 verified · 0 body-modified · 0 failed · 0 unreadable · 0 quarantined · 2 not KNOBE v1",
+    );
+    expect(boardSummary([entry("verified", true), entry("not-v1", true)])).toBe(
+      "All 1 KNOBE filed in portfolios · 1 not KNOBE v1.",
+    );
+    expect(boardSummary([entry("not-v1")])).toBe("No KNOBE v1 notes found in this vault yet · 1 not KNOBE v1.");
+    expect(boardSummary([entry("not-v1")], 2)).toBe("2 hidden from Recognition · 1 not KNOBE v1.");
+  });
 });

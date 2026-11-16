@@ -23,8 +23,11 @@ import {
   hex, DuplicateKeyError, NonJSONConstantError, parseStrictJson, canonical,
 } from "./pyjson";
 
-export type Status = "verified" | "verified-body-modified" | "failed" | "unreadable";
-export type Conformance = "valid" | "warnings" | "invalid";
+/** "not-v1": a recognized KNOBE serialization that is not KNOBE Protocol v1 (the
+ *  KNOBE.AI 0.1 HTML envelope). Never a v1 verdict: see `otherFormat`. */
+export type Status = "verified" | "verified-body-modified" | "failed" | "unreadable" | "not-v1";
+/** "not-assessed": the object is not KNOBE v1, so v1 conformance does not apply. */
+export type Conformance = "valid" | "warnings" | "invalid" | "not-assessed";
 export type BodyVerified = "yes" | "modified" | "omitted";
 
 export interface LensResult {
@@ -45,6 +48,21 @@ export interface LensResult {
   multipleBlocks: boolean;
   blockCount: number;
   reason: string | null;
+  /** Present only when state is "not-v1": what the other format's own check found. */
+  otherFormat?: OtherFormatCheck;
+}
+
+/** The check a non-v1 format declares for itself. It is not a KNOBE v1 result:
+ *  a KNOBE.AI 0.1 hash covers only the fields the file lists, and its join is not
+ *  prefix-free. */
+export interface OtherFormatCheck {
+  /** e.g. "KNOBE.AI 0.1", from the envelope's own knobe_version (escaped). */
+  format: string;
+  /** Whether the file's hash matches the fields it lists; null when not checked. */
+  hashMatches: boolean | null;
+  /** Field names the file lists for its hash (integrity.claim_fields). Raw
+   *  payload text: display through safe(). */
+  coveredFields: string[];
 }
 
 // A v1 lens must not guess how another protocol version is canonicalized or
@@ -415,11 +433,14 @@ function parsePlainJson(text: string): unknown {
  *  SECURITY NOTE: the v0.1 join is NOT prefix-free — values are concatenated with
  *  a plain separator and the field NAMES are not part of the preimage. A value
  *  containing the separator could let two structurally different payloads hash
- *  identically (separator injection). We faithfully implement the scheme but
- *  REFUSE to assert "verified" when any value contains the separator, since the
- *  preimage is then ambiguous. (Reported upstream: v0.2 should length-prefix or
- *  include field names.) `claim_fields` lists names; values are read from the
- *  sibling top-level `fields` map, per the format. */
+ *  identically (separator injection). We implement the scheme but refuse to
+ *  compare hashes when any value contains the separator, since the preimage is
+ *  then ambiguous. Even a match is never reported as a KNOBE v1 verdict.
+ *  (Reported upstream: v0.2 should length-prefix or include field names.)
+ *  `claim_fields` lists names; values are read from the sibling top-level
+ *  `fields` map, per the format. The preimage is capped at MAX_RAW_BYTES
+ *  characters: listing each field once cannot exceed the file itself, and a
+ *  name listed thousands of times would otherwise build a string of gigabytes. */
 type HashResult = { hash: string } | { error: string };
 async function claimFieldsJoinHash(payload: Record<string, unknown>): Promise<HashResult> {
   const integ = payload.integrity;
@@ -427,11 +448,16 @@ async function claimFieldsJoinHash(payload: Record<string, unknown>): Promise<Ha
   const fields = payload.fields;
   if (!isObj(fields)) return { error: "the fields object is missing" };
   const values: string[] = [];
+  let preimageLength = 0;
   for (const name of integ.claim_fields) {
     if (typeof name !== "string") return { error: "claim_fields contains a non-string name" };
     const v = fields[name];
     if (typeof v !== "string") return { error: `claim field '${safe(name)}' is missing or not a string` };
-    if (v.includes(CLAIM_JOIN_SEP)) return { error: `claim field '${safe(name)}' contains the join separator — ambiguous preimage, cannot verify safely` };
+    if (v.includes(CLAIM_JOIN_SEP)) return { error: `claim field '${safe(name)}' contains the join separator, so the preimage is ambiguous` };
+    preimageLength += v.length + CLAIM_JOIN_SEP.length;
+    if (preimageLength > MAX_RAW_BYTES) {
+      return { error: `the listed fields add up to more than ${MAX_RAW_BYTES} characters, more than the file can hold` };
+    }
     values.push(v);
   }
   return { hash: await sha256Hex(values.join(CLAIM_JOIN_SEP)) };
@@ -455,9 +481,70 @@ function extractHtmlPayloadJson(raw: string): string | null {
   return (script ? script[1] : between).trim();
 }
 
-/** Verify a KNOBE.AI 0.1 HTML-comment/script object. Self-describing: the payload
- *  declares its own canonicalization; we implement claim-fields-join-v0.1 and
- *  surface anything else as unreadable-but-recognized. */
+const NOT_V1_ISSUE = (format: string) =>
+  `not a KNOBE Protocol v1 object (${format} envelope, no KNOBE B64 payload block); KNOBE v1 conformance was not assessed`;
+// How many listed field names a reason spells out before summarizing the rest.
+const MAX_NAMED_FIELDS = 10;
+
+/** Display name for the envelope, from its own knobe_version when it has one. */
+function otherFormatName(payload: Record<string, unknown> | null): string {
+  const v = payload?.knobe_version;
+  return typeof v === "string" && v.trim() ? `KNOBE.AI ${safe(v, 20)}` : "KNOBE.AI HTML envelope";
+}
+
+/** The listed field names, as given (non-strings dropped). */
+function listedFields(payload: Record<string, unknown> | null): string[] {
+  const integ = payload?.integrity;
+  const names = isObj(integ) && Array.isArray(integ.claim_fields) ? integ.claim_fields : [];
+  return names.filter((n): n is string => typeof n === "string");
+}
+
+function fieldList(names: string[]): string {
+  const shown = names.slice(0, MAX_NAMED_FIELDS).map((n) => safe(n, 60)).join(", ");
+  return names.length > MAX_NAMED_FIELDS ? `${shown}, and ${names.length - MAX_NAMED_FIELDS} more` : shown;
+}
+
+/** A result for a recognized non-v1 envelope. It never carries a v1 state or
+ *  conformance level, whatever the envelope's own hash check found. */
+function notV1(
+  payload: Record<string, unknown> | null,
+  check: { computed: string; stored: string } | { error: string },
+): LensResult {
+  const format = otherFormatName(payload);
+  const coveredFields = listedFields(payload);
+  const lead = `${format} file, not a KNOBE v1 result.`;
+  let reason: string;
+  let hashMatches: boolean | null = null;
+  if ("error" in check) {
+    reason = `${lead} Its hash could not be checked: ${check.error}.`;
+  } else {
+    hashMatches = check.computed === check.stored;
+    const n = coveredFields.length;
+    const what = `the ${n} field${n === 1 ? "" : "s"} the file lists`;
+    // The caveat comes before the field list, so a report that cuts a long
+    // reason short still keeps it.
+    const listed = ` Listed: ${fieldList(coveredFields)}.`;
+    reason = hashMatches
+      ? `${lead} Its integrity.sha256 matches ${what}. Fields it does not list are not covered, and this hash scheme is not prefix-free.${listed}`
+      : `${lead} Its integrity.sha256 does not match ${what}.${listed}`;
+  }
+  return {
+    state: "not-v1",
+    computed: "error" in check ? null : check.computed,
+    stored: "error" in check ? null : check.stored,
+    payload, missing: [], body: null, bodyVerified: "omitted",
+    conformance: "not-assessed", conformanceIssues: [NOT_V1_ISSUE(format)],
+    multipleBlocks: false, blockCount: 1, reason,
+    otherFormat: { format, hashMatches, coveredFields },
+  };
+}
+
+/** Check a KNOBE.AI 0.1 HTML-comment/script object. Self-describing: the payload
+ *  declares its own canonicalization; we implement claim-fields-join-v0.1. The
+ *  result is always "not-v1": that hash covers only the fields the file lists
+ *  and its join is not prefix-free, so it is never shown as a KNOBE v1 verdict.
+ *  A note whose delimiters are incomplete, or whose payload is not a JSON
+ *  object, is not identifiable as KNOBE.AI and stays "unreadable". */
 async function verifyHtmlEnvelope(raw: string): Promise<LensResult> {
   const json = extractHtmlPayloadJson(raw);
   if (json === null) return unreadable("KNOBE payload markers not found", 0);
@@ -466,36 +553,31 @@ async function verifyHtmlEnvelope(raw: string): Promise<LensResult> {
   try {
     parsed = parseStrictJson(json);
   } catch {
+    // Unparseable text between the markers may just be prose quoting them: it
+    // is not identifiable as a KNOBE.AI object, so it stays unreadable.
     return unreadable("KNOBE payload could not be parsed", 1);
   }
   if (!isDict(parsed)) return unreadable("KNOBE payload is not a JSON object", 1);
   // UTF-8 encoding turns an unpaired surrogate into the bytes of U+FFFD, so two
-  // different claims would share one hash: reject, as the B64 path does.
+  // different claims would share one hash: refuse, as the B64 path does.
   if (hasLoneSurrogate(parsed)) {
-    return unreadable("KNOBE payload contains characters that cannot be UTF-8 encoded (e.g. an unpaired surrogate); rejected", 1);
+    return notV1(null, { error: "the payload contains characters that cannot be UTF-8 encoded (e.g. an unpaired surrogate)" });
   }
   const payload = toPlain(parsed) as Record<string, unknown>;
 
   const integ = isObj(payload.integrity) ? payload.integrity : null;
   const method = integ && isObj(integ.canonicalization) ? integ.canonicalization.method : undefined;
   if (method !== CLAIM_JOIN_METHOD) {
-    return unreadable(`unsupported KNOBE canonicalization '${typeof method === "string" ? safe(method) : "unknown"}'`, 1, payload);
+    return notV1(payload, { error: `unsupported KNOBE canonicalization '${typeof method === "string" ? safe(method) : "unknown"}'` });
   }
 
   const stored = integ && typeof integ.sha256 === "string" ? integ.sha256 : null;
   if (stored === null || !HEX64.test(stored)) {
-    return unreadable("KNOBE 0.1: integrity.sha256 is missing or not 64 lowercase hex", 1, payload);
+    return notV1(payload, { error: "integrity.sha256 is missing or not 64 lowercase hex" });
   }
   const res = await claimFieldsJoinHash(payload);
-  if ("error" in res) return unreadable(`KNOBE 0.1: ${res.error}`, 1, payload);
-
-  return {
-    state: res.hash === stored ? "verified" : "failed",
-    computed: res.hash, stored, payload, missing: [],
-    body: null, bodyVerified: "omitted",
-    conformance: "valid", conformanceIssues: [],
-    multipleBlocks: false, blockCount: 1, reason: null,
-  };
+  if ("error" in res) return notV1(payload, res);
+  return notV1(payload, { computed: res.hash, stored });
 }
 
 /** Decode the last bare-B (non-B64) block's JSON payload, or null. Used only to
@@ -530,8 +612,8 @@ export async function verify(raw: string): Promise<LensResult> {
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) blocks.push(m[1]);
   if (blocks.length === 0) {
-    // No PEM/B64 block. A KNOBE.AI 0.1 HTML-comment envelope is a separate, fully
-    // verifiable serialization — route to its own verifier.
+    // No PEM/B64 block. A KNOBE.AI 0.1 HTML-comment envelope is a separate
+    // serialization with its own, weaker hash check — reported as "not-v1".
     if (raw.includes("KNOBE_PAYLOAD_START")) return verifyHtmlEnvelope(raw);
     // Otherwise: if a bare-B (legacy/variant) block is present, surface it as
     // unreadable with its declared spec_version and payload so the dashboard

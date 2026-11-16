@@ -164,4 +164,64 @@ describe("buildReportMarkdown", () => {
     const title = md.split("\n").find((l) => l.startsWith("| Title |")) as string;
     expect(title).toBe(`| Title | ${"t".repeat(300)}… |`);
   });
+
+  it("reports a KNOBE.AI 0.1 file as not a KNOBE v1 result, with no verified or valid claim", () => {
+    const h = "c".repeat(64);
+    const md = render({
+      ...verified,
+      state: "not-v1",
+      conformance: "not-assessed",
+      computed: h,
+      stored: h,
+      payload: { knobe_version: "0.1", header: { title: "Grove" } },
+      conformanceIssues: ["not a KNOBE Protocol v1 object (KNOBE.AI 0.1 envelope, no KNOBE B64 payload block); KNOBE v1 conformance was not assessed"],
+      reason: "KNOBE.AI 0.1 file, not a KNOBE v1 result.",
+      otherFormat: { format: "KNOBE.AI 0.1", hashMatches: true, coveredFields: ["a", "b|c"] },
+    });
+    const head = md.split("## Integrity")[0];
+    expect(head).toContain("| **Status** | Not a KNOBE v1 result — KNOBE\\.AI 0\\.1 file |");
+    expect(head).toContain("| **Conformance** | not assessed (not a KNOBE v1 object) |");
+    expect(head).not.toMatch(/\b(verified|valid)\b/i);
+
+    const integrity = md.split("## Integrity")[1].split("## Conformance issues")[0];
+    expect(integrity).toContain("KNOBE\\.AI 0\\.1 hash, not a KNOBE v1 check");
+    expect(integrity).toContain(`| Stored \`integrity.sha256\` | \`${h}\` |`);
+    expect(integrity).toContain(`| Computed over the listed fields | \`${h}\` |`);
+    expect(integrity).toContain("| Fields the file lists | a, b\\|c |");
+    expect(integrity).toContain("| Match | yes, for the listed fields only |");
+    expect(integrity).not.toContain("payload_hash");
+    expect(integrity).not.toContain("✅");
+
+    // Nowhere in the report, footer and headings included.
+    expect(md).not.toMatch(/\b(verified|valid)\b/i);
+    expect(md).not.toContain("sealed payload");
+    expect(md).toContain("## Declared metadata (from the file's payload)");
+    expect(md).toContain("> **Not a KNOBE v1 result.** This file's own hash covers only the fields it lists.");
+  });
+
+  it("caps the listed field names in a KNOBE.AI 0.1 report", () => {
+    const md = render({
+      ...verified,
+      state: "not-v1",
+      conformance: "not-assessed",
+      otherFormat: { format: "KNOBE.AI 0.1", hashMatches: true, coveredFields: Array.from({ length: 53 }, (_, i) => `f${i}`) },
+    });
+    const cell = md.split("\n").find((l) => l.startsWith("| Fields the file lists |")) as string;
+    expect(cell).toContain("f49, and 3 more |");
+    expect(cell).not.toContain("f50");
+  });
+
+  it("says when a KNOBE.AI 0.1 hash could not be checked", () => {
+    const md = render({
+      ...verified,
+      state: "not-v1",
+      conformance: "not-assessed",
+      computed: null,
+      stored: null,
+      reason: "KNOBE.AI 0.1 file, not a KNOBE v1 result.",
+      otherFormat: { format: "KNOBE.AI 0.1", hashMatches: null, coveredFields: [] },
+    });
+    expect(md).toContain("| Match | not checked |");
+    expect(md).toContain("| Fields the file lists | — |");
+  });
 });
