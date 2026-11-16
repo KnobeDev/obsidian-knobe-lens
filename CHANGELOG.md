@@ -6,6 +6,8 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.7] - 2026-11-15
+
 ### Changed
 
 - A note in the KNOBE.AI 0.1 HTML format no longer shows as **verified** with
