@@ -152,3 +152,15 @@ describe("canFileRow (the board's Move to portfolio gate for one object)", () =>
     expect(canFileRow(row("a.md"), {}, filed)).toBe(true);
   });
 });
+
+describe("objects that are not KNOBE v1 stay out of portfolios", () => {
+  it("cannot be trusted-and-filed, even with a hash and a trusted verdict", () => {
+    const r = row("grove.md", "not-v1", "not-assessed", "grove-hash");
+    expect(canTrustAndFileRow(r, trustedOn("grove-hash"))).toBe(false);
+    expect(canFileRow(r, trustedOn("grove-hash"), false)).toBe(false);
+  });
+
+  it("cannot be moved to another portfolio even when it already sits in one", () => {
+    expect(canFileRow(row("grove.md", "not-v1", "not-assessed", null), {}, true)).toBe(false);
+  });
+});

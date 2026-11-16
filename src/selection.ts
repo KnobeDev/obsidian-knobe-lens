@@ -22,8 +22,9 @@ export function canTrustAndFileRow(row: ScanRow, trust: TrustLedger): boolean {
  * same intact, verified seal as bulk filing plus the user's trusted verdict: a
  * trusted verdict never excuses a broken seal or unreviewed edits. An object
  * already in a portfolio may still move to another one, which recognizes
- * nothing new. */
+ * nothing new — unless it is not KNOBE v1, which never moves between portfolios. */
 export function canFileRow(row: ScanRow, trust: TrustLedger, filed: boolean): boolean {
+  if (row.result.state === "not-v1") return false; // never part of a portfolio
   if (filed) return true;
   return canTrustAndFileRow(row, trust) && getVerdict(trust, row.payloadHash)?.verdict === "trusted";
 }

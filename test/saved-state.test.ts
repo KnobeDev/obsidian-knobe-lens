@@ -30,4 +30,8 @@ describe("savedState — filed object presentation", () => {
     expect(savedState(true, "failed", "invalid")).toBe("none");
     expect(savedState(true, "unreadable", "invalid")).toBe("none");
   });
+
+  it("a filed file that is not KNOBE v1 never earns the checkmark or a reverify prompt", () => {
+    expect(savedState(true, "not-v1", "not-assessed")).toBe("none");
+  });
 });

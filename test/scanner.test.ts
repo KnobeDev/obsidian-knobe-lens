@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { findUnindexedKnobeFiles, scanVault } from "../src/scanner";
 import { groupPortfolioRows, groupRecognitionRows } from "../src/board";
 import { isFiledUnder } from "../src/portfolio";
@@ -118,6 +119,28 @@ describe("scanVault display fields", () => {
       "Portfolios/Research/Existing.md",
     ]);
     expect(rows).toHaveLength(4);
+  });
+
+  it("gives a KNOBE.AI 0.1 file no content hash, so it joins no hash-keyed view", async () => {
+    const payload = {
+      knobe_version: "0.1",
+      header: { title: "Grove journey" },
+      fields: { a: "alpha" },
+      parents: [{ payload_hash: "d".repeat(64) }],
+      integrity: {
+        canonicalization: { method: "claim-fields-join-v0.1" },
+        claim_fields: ["a"],
+        sha256: createHash("sha256").update("alpha", "utf8").digest("hex"),
+      },
+    };
+    const raw = `# n\n\n<!-- KNOBE_PAYLOAD_START -->\n<script type="application/json">\n${JSON.stringify(payload)}\n</script>\n<!-- KNOBE_PAYLOAD_END -->\n`;
+    const rows = await scanVault(appWith({ "grove.md": raw }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].result.state).toBe("not-v1");
+    expect(rows[0].result.otherFormat?.hashMatches).toBe(true);
+    expect(rows[0].title).toBe("Grove journey");
+    expect(rows[0].payloadHash).toBeNull();
+    expect(rows[0].parents).toEqual([]);
   });
 
   it("lists an object whose spec_version is a JSON object instead of dropping it", async () => {

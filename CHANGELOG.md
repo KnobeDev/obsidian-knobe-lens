@@ -6,6 +6,30 @@ All notable changes to KNOBE Lens are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A note in the KNOBE.AI 0.1 HTML format no longer shows as **verified** with
+  conformance **valid**. Its hash covers only the fields the file chooses to
+  list, and its field join is not prefix-free, so it is not a KNOBE v1 result.
+  Lens now labels it **Not KNOBE v1**, with conformance **not assessed**, and
+  says whether the file's own hash matches the fields it lists. The same label
+  applies when the hash doesn't match or can't be checked. Status bar, Verify
+  notice and verification reports use the same wording.
+- These notes are listed in their own **Not KNOBE v1** section and kept out of
+  Recognition, portfolios (including filing and moving), the knowledge world,
+  lineage, trust verdicts and last-verified snapshots. A copy already sitting
+  in a portfolio folder no longer appears in that portfolio's lane. Their
+  verification reports drop the "verified seal" footer and never show a local
+  trust verdict.
+
+### Security
+
+- A KNOBE.AI 0.1 file that lists one large field thousands of times could
+  make Lens build a string of hundreds of megabytes to hash, or fail and drop
+  the file from the scan. The joined fields are now capped at the 1,000,000
+  characters a verifiable file can hold, and the file says its hash could not
+  be checked.
+
 ## [0.11.6] - 2026-11-11
 
 ### Added

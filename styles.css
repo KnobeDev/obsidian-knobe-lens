@@ -289,6 +289,28 @@ body.theme-dark .knobe-lens {
 .state-verified-body-modified { color: var(--color-yellow); }
 .state-failed { color: var(--color-red); }
 .state-unreadable { color: var(--text-muted); }
+.state-not-v1 { color: var(--text-muted); }
+
+/* Files that are not KNOBE v1: a plain list, apart from the Recognition board */
+.knobe-lens-other-formats[hidden] {
+  display: none;
+}
+.knobe-lens-other-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.knobe-lens-other-item {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 6px;
+}
+.knobe-lens-other-item.is-selected {
+  border-style: solid;
+  border-color: var(--interactive-accent);
+  box-shadow: inset 3px 0 0 var(--interactive-accent);
+}
 
 /* detail pane */
 .knobe-lens-detail:empty {

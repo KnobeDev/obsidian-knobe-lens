@@ -172,32 +172,60 @@ describe("KNOBE.AI 0.1 HTML-comment / claim-fields-join envelope", () => {
     expect(hasKnobeMarker("x\n<!-- KNOBE_PAYLOAD_START -->\n")).toBe(true);
   });
 
-  it("verifies a correct claim-fields-join seal", async () => {
+  // A KNOBE.AI 0.1 hash covers only the fields the file itself lists, joined
+  // with a separator that is not prefix-free. Whatever it finds, Lens must not
+  // present it as a KNOBE v1 verdict: no "verified", no "valid", no "failed".
+  const V1_WORDS = /\b(verified|valid|failed)\b/i;
+  const expectNotV1 = (r: Awaited<ReturnType<typeof verify>>) => {
+    expect(r.state).toBe("not-v1");
+    expect(r.conformance).toBe("not-assessed");
+    expect(r.reason).toContain("not a KNOBE v1 result");
+    for (const text of [r.state, r.conformance, r.reason ?? "", ...r.conformanceIssues]) {
+      expect(text).not.toMatch(V1_WORDS);
+    }
+  };
+
+  it("labels a matching claim-fields-join hash as not a KNOBE v1 result", async () => {
     const r = await verify(doc(payload(claimHash(["alpha", "beta value"]))));
-    expect(r.state).toBe("verified");
-    expect(r.conformance).toBe("valid");
+    expectNotV1(r);
+    expect(r.otherFormat).toEqual({ format: "KNOBE.AI 0.1", hashMatches: true, coveredFields: ["a", "b"] });
+    expect(r.reason).toContain("matches the 2 fields the file lists. Fields it does not list are not covered, and this hash scheme is not prefix-free. Listed: a, b.");
+    expect(r.conformanceIssues).toEqual([
+      "not a KNOBE Protocol v1 object (KNOBE.AI 0.1 envelope, no KNOBE B64 payload block); KNOBE v1 conformance was not assessed",
+    ]);
     expect((r.payload?.header as Record<string, string>)?.title).toBe("Grove journey");
   });
 
-  it("fails when a sealed claim field is tampered", async () => {
-    const sha = claimHash(["alpha", "beta value"]); // hash over the ORIGINAL values
-    const r = await verify(doc(payload(sha, { a: "alpha", b: "TAMPERED" })));
-    expect(r.state).toBe("failed");
+  it("names the fields the hash leaves out", async () => {
+    const r = await verify(doc(payload(claimHash(["alpha", "beta value"]), { a: "alpha", b: "beta value", c: "unsealed" })));
+    expectNotV1(r);
+    expect(r.otherFormat?.hashMatches).toBe(true);
+    expect(r.reason).toContain("Fields it does not list are not covered");
   });
 
-  it("surfaces an unsupported canonicalization method as unreadable but recognized", async () => {
+  it("reports a tampered claim field as a mismatch, still not as a KNOBE v1 failure", async () => {
+    const sha = claimHash(["alpha", "beta value"]); // hash over the ORIGINAL values
+    const r = await verify(doc(payload(sha, { a: "alpha", b: "TAMPERED" })));
+    expectNotV1(r);
+    expect(r.otherFormat?.hashMatches).toBe(false);
+    expect(r.reason).toContain("does not match the 2 fields the file lists. Listed: a, b.");
+  });
+
+  it("keeps an unsupported canonicalization method recognized but unchecked", async () => {
     const p = payload("0".repeat(64));
     p.integrity.canonicalization.method = "claim-fields-join-v9.9";
     const r = await verify(doc(p));
-    expect(r.state).toBe("unreadable");
+    expectNotV1(r);
+    expect(r.otherFormat?.hashMatches).toBeNull();
     expect(r.reason).toContain("unsupported KNOBE canonicalization");
-    expect(r.payload).toBeTruthy(); // still recognized, just not verified
+    expect(r.payload).toBeTruthy();
   });
 
-  it("refuses to verify when a claim value contains the join separator (injection guard)", async () => {
+  it("refuses to check when a claim value contains the join separator (injection guard)", async () => {
     const fields = { a: "alpha\n---\ninjected", b: "beta value" };
     const r = await verify(doc(payload(claimHash(["alpha\n---\ninjected", "beta value"]), fields)));
-    expect(r.state).toBe("unreadable"); // would otherwise hash-match — refused as ambiguous
+    expectNotV1(r); // would otherwise hash-match — refused as ambiguous
+    expect(r.otherFormat?.hashMatches).toBeNull();
     expect(r.reason).toContain("separator");
   });
 
@@ -207,16 +235,72 @@ describe("KNOBE.AI 0.1 HTML-comment / claim-fields-join envelope", () => {
     const sha = claimHash([String.fromCharCode(0xfffd), "beta value"]);
     const json = JSON.stringify(payload(sha)).replace('"a":"alpha"', '"a":"\\ud800"');
     const r = await verify(`# n\n\n<!-- KNOBE_PAYLOAD_START -->\n<script type="application/json">\n${json}\n</script>\n<!-- KNOBE_PAYLOAD_END -->\n`);
-    expect(r.state).toBe("unreadable");
+    expectNotV1(r);
+    expect(r.otherFormat?.hashMatches).toBeNull();
     expect(r.reason).toContain("unpaired surrogate");
   });
 
-  it("treats a missing integrity.sha256 as unreadable, not failed", async () => {
+  it("treats a missing integrity.sha256 as unchecked, not as a mismatch", async () => {
     const p = payload("");
     (p.integrity as Record<string, unknown>).sha256 = undefined;
     const r = await verify(doc(p));
-    expect(r.state).toBe("unreadable");
+    expectNotV1(r);
+    expect(r.otherFormat?.hashMatches).toBeNull();
     expect(r.reason).toContain("integrity.sha256");
+  });
+
+  it("names the version the envelope declares instead of assuming 0.1", async () => {
+    const p = { ...payload("0".repeat(64)), knobe_version: "0.2" };
+    const r = await verify(doc(p));
+    expectNotV1(r);
+    expect(r.otherFormat?.format).toBe("KNOBE.AI 0.2");
+  });
+
+  it("leaves unparseable text between the markers unreadable: it may be prose quoting them", async () => {
+    const r = await verify("# n\n\n<!-- KNOBE_PAYLOAD_START -->\n<script>{not json</script>\n<!-- KNOBE_PAYLOAD_END -->\n");
+    expect(r.state).toBe("unreadable");
+    expect(r.reason).toBe("KNOBE payload could not be parsed");
+    expect(r.otherFormat).toBeUndefined();
+    const arr = await verify("<!-- KNOBE_PAYLOAD_START -->\n<script>[1]</script>\n<!-- KNOBE_PAYLOAD_END -->\n");
+    expect(arr.state).toBe("unreadable");
+    expect(arr.reason).toBe("KNOBE payload is not a JSON object");
+  });
+
+  it("names an envelope without a knobe_version generically", async () => {
+    const p: Record<string, unknown> = payload(claimHash(["alpha", "beta value"]));
+    delete p.knobe_version;
+    const r = await verify(doc(p));
+    expectNotV1(r);
+    expect(r.otherFormat?.format).toBe("KNOBE.AI HTML envelope");
+  });
+
+  it("names ten listed fields and counts the rest", async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `f${i}`);
+    const fields = Object.fromEntries(names.map((n) => [n, `v${n}`]));
+    const p = payload(claimHash(names.map((n) => `v${n}`)), fields);
+    p.integrity.claim_fields = names;
+    const r = await verify(doc(p));
+    expectNotV1(r);
+    expect(r.otherFormat?.coveredFields).toHaveLength(12);
+    expect(r.reason).toContain("Listed: f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, and 2 more.");
+  });
+
+  it("refuses to build a preimage larger than the file could hold", async () => {
+    // One 50 KB value listed 30 times: 1.5 MB of preimage from a ~200 KB file.
+    const big = "x".repeat(50_000);
+    const p = payload("0".repeat(64), { a: big, b: "beta value" });
+    p.integrity.claim_fields = Array(30).fill("a");
+    const r = await verify(doc(p));
+    expectNotV1(r);
+    expect(r.otherFormat?.hashMatches).toBeNull();
+    expect(r.reason).toContain("more than 1000000 characters");
+  });
+
+  it("verifies a note with a KNOBE B64 block on the v1 path even if it also has the 0.1 markers", async () => {
+    const vector = readFileSync(join(process.cwd(), "test/vectors/minimal-valid.knobe.md"), "utf8");
+    const r = await verify(vector + "\n<!-- KNOBE_PAYLOAD_START -->\n<script>{}</script>\n<!-- KNOBE_PAYLOAD_END -->\n");
+    expect(r.state).toBe("verified");
+    expect(r.otherFormat).toBeUndefined();
   });
 });
 

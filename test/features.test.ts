@@ -61,6 +61,16 @@ describe("break diagnosis", () => {
     const d = await diagnoseBreak(sealed, await verify(sealed));
     expect(d.kind).toBe("ok");
   });
+
+  it("a KNOBE.AI 0.1 file is never diagnosed as an intact seal", async () => {
+    const payload = { knobe_version: "0.1", fields: {}, integrity: { canonicalization: { method: "other" } } };
+    const raw = `<!-- KNOBE_PAYLOAD_START -->\n<script>${JSON.stringify(payload)}</script>\n<!-- KNOBE_PAYLOAD_END -->\n`;
+    const r = await verify(raw);
+    const d = await diagnoseBreak(raw, r);
+    expect(d.kind).toBe("not-v1");
+    expect(d.benign).toBe(false);
+    expect(d.detail).toBe(r.reason);
+  });
 });
 
 describe("line diff", () => {

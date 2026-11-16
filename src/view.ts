@@ -13,7 +13,7 @@ import { WorldGlobe, WorldDatum, WorldEdge, WorldRenderData } from "./world-rend
 import { getVerdict, Verdict } from "./trust";
 import { NEW_FOLDER_VALUE, NO_FOLDER_VALUE, isFiledUnder, isFolder } from "./portfolio";
 import { NewFolderModal } from "./new-folder-modal";
-import { groupPortfolioRows, groupRecognitionRows } from "./board";
+import { groupOtherFormatRows, groupPortfolioRows, groupRecognitionRows, otherFormatLabel } from "./board";
 import {
   boardSummary,
   shouldMovePortfolioCard,
@@ -34,12 +34,14 @@ export const STATE_LABEL: Record<Status, string> = {
   "verified-body-modified": "Body modified",
   failed: "Failed",
   unreadable: "Unreadable",
+  "not-v1": "Not KNOBE v1",
 };
 const STATE_ICON: Record<Status, string> = {
   verified: "shield-check",
   "verified-body-modified": "file-warning",
   failed: "shield-x",
   unreadable: "help-circle",
+  "not-v1": "file-question",
 };
 
 interface BulkTarget {
@@ -58,7 +60,12 @@ export class KnobeLensView extends ItemView {
   private portfolioRows: ScanRow[] = [];
   private selectedPath: string | null = null;
   private rowTriggers = new Map<string, HTMLElement>();
+  /** Title buttons in the "Not KNOBE v1" list, kept apart from rowTriggers,
+   *  which the Recognition board clears on every redraw. */
+  private otherTriggers = new Map<string, HTMLElement>();
   private recognitionEl!: HTMLElement;
+  private otherFormatEl!: HTMLElement;
+  private otherFormatList!: HTMLElement;
   private detailEl!: HTMLElement;
   private onboardEl!: HTMLElement;
   private worldEl!: HTMLElement;
@@ -199,6 +206,21 @@ export class KnobeLensView extends ItemView {
         "aria-label": "KNOBE objects grouped by recognition result",
       },
     });
+
+    // Files in another KNOBE format: listed apart from Recognition, portfolios,
+    // the world and lineage, because their own hash check is not a v1 result.
+    const otherHeadingId = `kl-other-formats-${uid}`;
+    this.otherFormatEl = root.createEl("section", {
+      cls: "knobe-lens-other-formats",
+      attr: { "aria-labelledby": otherHeadingId },
+    });
+    this.otherFormatEl.hidden = true;
+    this.otherFormatEl.createEl("h4", { text: "Not KNOBE v1", attr: { id: otherHeadingId } });
+    this.otherFormatEl.createEl("p", {
+      cls: "knobe-lens-note",
+      text: "These files use another KNOBE format, KNOBE.AI 0.1. Lens checks the hash each file declares, but that is not a KNOBE v1 result: it covers only the fields the file lists, and the scheme is not prefix-free. They are kept out of Recognition, portfolios, the knowledge world and lineage.",
+    });
+    this.otherFormatList = this.otherFormatEl.createEl("ul", { cls: "knobe-lens-other-list" });
 
     this.detailEl = root.createDiv({ cls: "knobe-lens-detail", attr: { role: "region", tabindex: "-1", "aria-label": "Object detail" } });
 
@@ -350,6 +372,7 @@ export class KnobeLensView extends ItemView {
     this.renderSummary();
     this.renderOnboarding();
     this.renderRecognitionBoard();
+    this.renderOtherFormats();
     this.renderWorld();
     this.renderLineage();
     this.renderPortfolios();
@@ -470,6 +493,38 @@ export class KnobeLensView extends ItemView {
     this.renderBulkToolbar();
     if (focusedPath) (this.bulkCheckboxes.get(focusedPath) ?? this.recognitionHeading).focus();
     if (focusedDismissal) (this.dismissButtons.get(focusedDismissal) ?? this.recognitionHeading).focus();
+  }
+
+  /** List the files that are not KNOBE v1, with what their own check found.
+   *  They get no trust, filing or dismissal controls: only a way to open the
+   *  detail pane. */
+  private renderOtherFormats(): void {
+    // A background rescan rebuilds this list: keep keyboard focus on the same
+    // file's button, or move it to the Recognition heading if the file is gone.
+    const active = this.otherFormatEl.ownerDocument.activeElement;
+    const focusedPath = [...this.otherTriggers].find(([, button]) => button === active)?.[0];
+    this.otherFormatList.empty();
+    this.otherTriggers.clear();
+    const rows = groupOtherFormatRows(this.rows, this.portfolioRows);
+    this.otherFormatEl.hidden = rows.length === 0;
+    for (const row of rows) {
+      const item = this.otherFormatList.createEl("li", { cls: "knobe-lens-other-item" });
+      item.toggleClass("is-selected", row.file.path === this.selectedPath);
+      const trigger = item.createEl("button", { cls: "knobe-lens-row-trigger knobe-lens-card-title" });
+      trigger.setAttr("aria-pressed", String(row.file.path === this.selectedPath));
+      trigger.createSpan({ text: row.title, cls: "knobe-lens-title" });
+      trigger.onclick = () => void this.select(row);
+      this.otherTriggers.set(row.file.path, trigger);
+      item.createDiv({ text: row.file.path, cls: "knobe-lens-path" });
+      if (row.result.otherFormat) {
+        // The caveat is the point of this list, so a screen reader announces it
+        // with the button, not only in browse mode.
+        const labelId = `kl-other-label-${++controlIdSeq}`;
+        item.createDiv({ cls: "knobe-lens-muted", text: otherFormatLabel(row.result.otherFormat), attr: { id: labelId } });
+        trigger.setAttr("aria-describedby", labelId);
+      }
+    }
+    if (focusedPath) (this.otherTriggers.get(focusedPath) ?? this.recognitionHeading).focus();
   }
 
   /** Render one kanban card. The final row always contains the folder control,
@@ -1332,10 +1387,10 @@ export class KnobeLensView extends ItemView {
   }
 
   private updateRowSelection(): void {
-    for (const [path, trigger] of this.rowTriggers) {
+    for (const [path, trigger] of [...this.rowTriggers, ...this.otherTriggers]) {
       const isSel = path === this.selectedPath;
       trigger.setAttr("aria-pressed", String(isSel));
-      trigger.closest(".knobe-lens-card")?.toggleClass("is-selected", isSel);
+      trigger.closest(".knobe-lens-card, .knobe-lens-other-item")?.toggleClass("is-selected", isSel);
     }
   }
 
@@ -1368,7 +1423,7 @@ export class KnobeLensView extends ItemView {
     };
     const clear = headActions.createEl("button", { text: "Clear results" });
     clear.onclick = () => {
-      const restoreFocus = this.rowTriggers.get(row.file.path);
+      const restoreFocus = this.rowTriggers.get(row.file.path) ?? this.otherTriggers.get(row.file.path);
       this.selectedPath = null;
       this.updateRowSelection();
       this.world?.setSelected(null);
@@ -1378,8 +1433,9 @@ export class KnobeLensView extends ItemView {
     };
 
     const p = row.result.payload ?? {};
-    // 0.1 envelopes store the hash in integrity.sha256, not a payload_hash field.
-    const hashField = "integrity" in p && !("payload_hash" in p) ? "integrity.sha256" : "payload_hash";
+    if (row.result.otherFormat) this.renderOtherFormatNotice(d, row.result.reason);
+    // A KNOBE.AI envelope stores its hash in integrity.sha256, not payload_hash.
+    const hashField = row.result.otherFormat ? "integrity.sha256" : "payload_hash";
     const hashLine = d.createDiv({ cls: "knobe-lens-hash" });
     if (row.result.state === "failed") {
       hashLine.createSpan({ text: `${hashField} mismatch: `, cls: "knobe-lens-bad" });
@@ -1409,6 +1465,10 @@ export class KnobeLensView extends ItemView {
       bodyWrap.createEl("pre", { cls: "knobe-lens-pre knobe-lens-body", text: preview });
     }
 
+    // Not KNOBE v1: no reverify, break inspector or trust verdict. Those are v1
+    // tools, and the notice above says what the file's own check found.
+    if (row.result.state === "not-v1") return;
+
     const filed = this.isFiled(row);
     const filedBodyModified = filed && row.result.state === "verified-body-modified";
     if (filed) this.renderReverifySection(d, row);
@@ -1417,6 +1477,18 @@ export class KnobeLensView extends ItemView {
     // shows the change diff + reseal, so don't render the inspector's duplicate diff.
     if (row.result.state !== "verified" && !filedBodyModified) await this.renderBreakInspector(d, row);
     this.renderTrustControls(d, row);
+  }
+
+  /** Plain statement at the top of the detail pane for a file that is not
+   *  KNOBE v1. `reason` is built by the verifier with payload text escaped. */
+  private renderOtherFormatNotice(parent: HTMLElement, reason: string | null): void {
+    const box = parent.createDiv({ cls: "knobe-lens-warn knobe-lens-other-notice" });
+    box.createEl("strong", { text: "Not a KNOBE v1 result." });
+    if (reason) box.createDiv({ text: reason });
+    box.createDiv({
+      cls: "knobe-lens-muted",
+      text: "Lens does not record trust verdicts for this format or file it in portfolios.",
+    });
   }
 
   /** Detail-pane block for a filed (portfolio) object: a "saved & verified"

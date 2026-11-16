@@ -10,7 +10,9 @@ export interface ScanRow {
   title: string;
   quarantine: string;
   contentType: string;
-  /** Content identity hash (verifier's computed hash); null when unreadable. */
+  /** KNOBE v1 content identity hash (the verifier's computed payload_hash);
+   *  null when unreadable or not KNOBE v1, so such a file never joins a
+   *  hash-keyed view (world, lineage, trust verdicts, snapshots). */
   payloadHash: string | null;
   /** Declared parent payload hashes, for lineage. */
   parents: string[];
@@ -114,8 +116,8 @@ export async function scanVault(app: App, folder = "", portfolioRoot = ""): Prom
         title: safe(pickTitle(p, file.basename)),
         quarantine: typeof p.quarantine_status === "string" ? safe(p.quarantine_status) : "—",
         contentType: typeof p.content_type === "string" ? safe(p.content_type) : "—",
-        payloadHash: result.computed,
-        parents: parentHashes(result.payload),
+        payloadHash: result.state === "not-v1" ? null : result.computed,
+        parents: result.state === "not-v1" ? [] : parentHashes(result.payload),
       });
     } catch {
       /* File might have been renamed or deleted mid-scan, skip it */
